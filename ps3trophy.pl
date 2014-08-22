@@ -6,6 +6,7 @@
 
 use strict;
 use Getopt::Long;
+use HTML::TokeParser::Simple;
 
 my $script_name = $0;
 $script_name =~ s/.*\///;
@@ -58,115 +59,19 @@ if ($help) {
 }
 
 my %trophy_imgmap = (
-	DEFAULT => 'mini_default.png',
-	BRONZE => 'mini_bronze.png',
-	SILVER => 'mini_silver.png',
-	GOLD => 'mini_gold.png',
-	PLATINUM => 'mini_platinum.png',
+	default => 'mini_default.png',
+	bronze => 'mini_bronze.png',
+	silver => 'mini_silver.png',
+	gold => 'mini_gold.png',
+	platinum => 'mini_platinum.png',
+	unknown => '',
 );
 
-# parse the "save-as-complete" webpage from psn and build a db hash
-my $us = 0;
 my %trophies_us;
-my $trophyn_us = 0;
-my $hidden = 0;
-my $locked = 0;
-
-my $uk = 0;
 my %trophies_uk;
-my $trophyn_uk = 0;
-while (<STDIN>) {
-	# us.playstation.com
-	if (m# href="http://us.playstation.com/playstation/psn/profiles/fritxhardy/trophies"#) {
-		$us = 1;
-		$uk = 0;
-	}
-	if ($us) {
-		# slot determines visibility
-		if (m/div class="slot\s+(.*)"/) {
-			if (!$1) {
-				$hidden = 0;
-			} elsif ($1 eq "hiddenTrophy") {
-				$hidden = 1;
-			}
-			$trophyn_us++;
-		}
-		# slotcontent determines locked/unlocked
-		if (m/div class="slotcontent\s+(.*)"/) {
-			if (!$1) {
-				$locked = 1;
-			} elsif ($1 eq "showTrophyDetail") {
-				$locked = 0;
-			}
-		}
-		# we are into the trophy section at least
-		if ($trophyn_us) {
-			if (m/img.*src="(\S+)".*\>/) {
-				my $img = $1;
-				$img =~ s#.*/## if ($path);
-				$trophies_us{$trophyn_us}{img} = $img;
-			}
-			if ($hidden && $locked) {	# reset with every line until next trophy, so what?
-				$trophies_us{$trophyn_us}{text} = '???';
-			}
-			else {
-				if (m/span class="trophyTitleSortField"\>(.*)<\/span\>/) {
-					$trophies_us{$trophyn_us}{text} = clean_str($1);
-				}
-				elsif (m/span class="subtext"\>(.*)<\/span\>/ || m/span class="subtext"\>(.*)$/) {
-					$trophies_us{$trophyn_us}{subtext} = clean_str($1);
-				}
-				elsif (m/span class="dateEarnedSortField".*\>(.*)<\/span\>/) {
-					$trophies_us{$trophyn_us}{date} = $1;
-				}
-				elsif (m/BRONZE|SILVER|GOLD|PLATINUM/) {
-					my $metal = $_;
-					$metal =~ s/\s+//g;
-					$trophies_us{$trophyn_us}{metal} = $metal;
-				}
-			}
-		}
-		if (m/<p class="profile_note">Note: The above information is dependent/) {
-			$us = 0;
-		}
-	}
 
-	# uk.playstation.com
-	if (m# href="http://uk.playstation.com/psn/mypsn/trophies/detail/"#) {
-		$uk = 1;
-		$us = 0;
-	}
-	if ($uk == 1) {
-		if (m/div class="gameLevelListItem"/) {
-			$trophyn_uk++;
-		}
-		if ($trophyn_uk) {
-			if (m/div class="gameLevelImage".*src="(.*)"\s+/) {
-				my $img = $1;
-				$img =~ s#.*/## if ($path);
-				$img =~ s/icon_trophy_padlock.gif/trophy_locksmall.png/ if ($img =~ m/icon_trophy_padlock.gif/);
-				$trophies_uk{$trophyn_uk}{img} = $img;
-			}
-			elsif (m/div class="gameLevelTrophyType".*alt="(.*)"/) {
-				my $metal = $1;
-				$metal = uc($metal);
-				$trophies_uk{$trophyn_uk}{metal} = $metal;
-			}
-			elsif (m/<p class="title">(.*)<\/p>/) {
-				$trophies_uk{$trophyn_uk}{text} = clean_str($1);
-			}
-			elsif (m/<p class="date">(.*)<\/p>/) {
-				$trophies_uk{$trophyn_uk}{date} = clean_str($1);
-			}
-			elsif (m/^\s+<p>(.*)<\/p>$/ || m/^\s+<p>(.*)$/) {
-				$trophies_uk{$trophyn_uk}{subtext} = clean_str($1);
-			}
-		}
-		if (m/div class="sortBarHatchedBtm"/) {
-			$uk = 0;
-		}
-	}
-}
+# parse the "save-as-complete" webpage from psn scrape into the above hashes
+scrape_20140607();
 
 my %trophies_corrections;
 if ($corrections and -e $corrections) {
@@ -212,8 +117,8 @@ if ($verbose > 1) {
 	}
 }
 
-# the lazy fucks at us.playstation.com have incomplete listings so we overlay
-# them and then overlay corrections
+# the lazy fucks at us.playstation.com have incomplete 
+# listings so we overlay: uk -> us -> corrections (US has bigger graphics)
 my %trophies;
 if (%trophies_uk) {
 	foreach (sort {$a <=> $b} (keys(%trophies_uk))) {
@@ -314,13 +219,13 @@ print <<EOT;
 	width: 300px;
 	margin: 5px 5px 5px 5px;	
 }
-.trophytext {
+.trophyname {
 	margin: 0px 0px 0px 0px;
 	text-align: left;
 	font-size: 13px;
 	font-weight: bold;
 }
-.trophysubtext {
+.trophytext {
 	font-size: 10px;
 	font-weight: normal;
 }
@@ -354,7 +259,7 @@ foreach (sort {$a <=> $b} (keys(%trophies))) {
 	my %trophy = %{$trophies{$_}};
 	print "<div class=\"trophyrow\">\n";
 	print "\t<div class=\"trophyimage\"><img src=\"".$trophy{img}."\" alt=\"".$trophy{text}."\" title=\"".$trophy{text}."\"></div>\n";
-	print "\t<div class=\"trophytitle\"><span class=\"trophytext\">".$trophy{text}."</span><br><span class=\"trophysubtext\">".$trophy{subtext}."</span></div>\n";
+	print "\t<div class=\"trophytitle\"><span class=\"trophyname\">".$trophy{name}."</span><br><span class=\"trophytext\">".$trophy{text}."</span></div>\n";
 	
 	print "\t<div class=\"trophydate\">".$trophy{date}."</div>\n";
 	
@@ -418,4 +323,317 @@ sub clean_str {
 		$last_ord = $ord;
 	}
 	return $clean_str;
+}
+
+sub scrape_2012 {
+	my $us;
+	my $trophyn_us = 0;
+	my $hidden = 0;
+	my $locked = 0;
+	
+	my $uk;
+	my $trophyn_uk = 0;
+	
+	while (<STDIN>) {
+		# us.playstation.com
+		if (m# href="http://us.playstation.com/playstation/psn/profiles/fritxhardy/trophies"#) {
+			$us = 1;
+			$uk = 0;
+		}
+		if ($us) {
+			# slot determines visibility
+			if (m/div class="slot\s+(.*)"/) {
+				if (!$1) {
+					$hidden = 0;
+				} elsif ($1 eq "hiddenTrophy") {
+					$hidden = 1;
+				}
+				$trophyn_us++;
+			}
+			# slotcontent determines locked/unlocked
+			if (m/div class="slotcontent\s+(.*)"/) {
+				if (!$1) {
+					$locked = 1;
+				} elsif ($1 eq "showTrophyDetail") {
+					$locked = 0;
+				}
+			}
+			# we are into the trophy section at least
+			if ($trophyn_us) {
+				if (m/img.*src="(\S+)".*\>/) {
+					my $img = $1;
+					$img =~ s#.*/## if ($path);
+					$trophies_us{$trophyn_us}{img} = $img;
+				}
+				if ($hidden && $locked) {	# reset with every line until next trophy, so what?
+					$trophies_us{$trophyn_us}{text} = '???';
+				}
+				else {
+					if (m/span class="trophyTitleSortField"\>(.*)<\/span\>/) {
+						$trophies_us{$trophyn_us}{text} = clean_str($1);
+					}
+					elsif (m/span class="subtext"\>(.*)<\/span\>/ || m/span class="subtext"\>(.*)$/) {
+						$trophies_us{$trophyn_us}{subtext} = clean_str($1);
+					}
+					elsif (m/span class="dateEarnedSortField".*\>(.*)<\/span\>/) {
+						$trophies_us{$trophyn_us}{date} = $1;
+					}
+					elsif (m/BRONZE|SILVER|GOLD|PLATINUM/) {
+						my $metal = $_;
+						$metal =~ s/\s+//g;
+						$trophies_us{$trophyn_us}{metal} = $metal;
+					}
+				}
+			}
+			if (m/<p class="profile_note">Note: The above information is dependent/) {
+				$us = 0;
+			}
+		}
+	
+		# uk.playstation.com
+		if (m# href="http://uk.playstation.com/psn/mypsn/trophies/detail/"#) {
+			$uk = 1;
+			$us = 0;
+		}
+		if ($uk == 1) {
+			if (m/div class="gameLevelListItem"/) {
+				$trophyn_uk++;
+			}
+			if ($trophyn_uk) {
+				if (m/div class="gameLevelImage".*src="(.*)"\s+/) {
+					my $img = $1;
+					$img =~ s#.*/## if ($path);
+					$img =~ s/icon_trophy_padlock.gif/trophy_locksmall.png/ if ($img =~ m/icon_trophy_padlock.gif/);
+					$trophies_uk{$trophyn_uk}{img} = $img;
+				}
+				elsif (m/div class="gameLevelTrophyType".*alt="(.*)"/) {
+					my $metal = $1;
+					$metal = uc($metal);
+					$trophies_uk{$trophyn_uk}{metal} = $metal;
+				}
+				elsif (m/<p class="title">(.*)<\/p>/) {
+					$trophies_uk{$trophyn_uk}{text} = clean_str($1);
+				}
+				elsif (m/<p class="date">(.*)<\/p>/) {
+					$trophies_uk{$trophyn_uk}{date} = clean_str($1);
+				}
+				elsif (m/^\s+<p>(.*)<\/p>$/ || m/^\s+<p>(.*)$/) {
+					$trophies_uk{$trophyn_uk}{subtext} = clean_str($1);
+				}
+			}
+			if (m/div class="sortBarHatchedBtm"/) {
+				$uk = 0;
+			}
+		}
+	}
+}
+
+sub scrape_20140607 {
+# 2014-06-07 USA
+# <tr class="trophy-tr">
+#	<td class="trophy-td trophy-unlocked-true">
+#		<div class="absolute-position-wrapper">
+#			<span class="trophy-icon trophy-type-platinum">
+#			</span>
+#		</div>
+#		<div class="itemWrap singleTrophyTile">
+#			<a href="javascript:void(0)">
+#				<div class="cellWrap cell1">
+#					<img src="the_last_of_us_usa_files/locked_trophy.png">
+#				</div>
+#				<div class="cellWrap cell2 image">
+#					<hgroup>
+#						<h1 class="trophy_name platinum">It can't be for nothing</h1>
+#						<h2>Platinum Trophy</h2>
+#					</hgroup>
+#				</div>
+#			</a>
+#		</div>
+#	</td>
+#	<td class="trophy-td">
+#		<span class="locked"></span>
+#	</td>
+#	<td class="trophy-td">
+#	</td>
+#	<td class="trophy-td">
+#	</td>
+#	<td class="trophy-td">
+#	</td>
+#</tr>
+
+# 2014-06-07 UK
+#<tr>
+#	<td class="trophy-unlocked-false">
+#		<div class="absolute-position-wrapper">
+#			<span class="trophy-icon trophy-type-platinum"></span>
+#		</div>
+#		<div class="itemWrap singleTrophyTile">
+#			<a href="http://uk.playstation.com/psn/mypsn/trophies/detail/?title=72967">
+#				<div class="cellWrap cell1">
+#					<img src="the_last_of_us_uk_files/locked_trophy.png" alt="">
+#                </div>
+#
+#                <div class="cellWrap cell2 image">
+#					<hgroup>
+#						<h1>
+#						</h1>
+#						<h1 class="trophy_name platinum">
+#							It can't be for nothing
+#						</h1>
+#						<h2>
+#							Platinum Trophy
+#						</h2>
+#					</hgroup>
+#				</div>
+#			</a>
+#		</div>
+#	</td>
+#	<td>
+#		<span class="locked">
+#			&nbsp;
+#		</span>
+#	</td>
+#</tr>
+
+	my $country = '';
+	my $trophyn_us = 0;
+	my $hidden = 0;
+	my $locked = 0;
+	my $trophyn_uk = 0;
+
+	while (<STDIN>) {
+		# us.playstation.com
+		if (m#.* href="https://secure.cdn.us.playstation.com/.*"#) {
+			$country = 'us';
+		}
+		if ($country eq 'us') {
+			if (m/table-overflow-wrapper clearfix/) { # one giant mess of a line
+				my @rows = split(/\<tr class=\"trophy-tr\"\>/,$_);
+				
+				# first row has special stuff we could use to 
+				# auto-create header but we do not care for now
+				my $special = shift(@rows);
+				
+				# it is probably better not to construct a new object over and 
+				# over and instead just parse the whole doc but oh well
+				foreach my $r (@rows) {
+					$trophyn_us++;
+					
+					print "$r\n\n" if $verbose;	
+					
+					my $p = HTML::TokeParser::Simple->new(\$r);
+					my $t;
+					while ( my $token = $p->get_token ) {
+						if ($verbose > 1) {
+							$t++;
+							my $asis = $token->as_is();
+							my $tag = $token->get_tag();
+							my $hash = $token->get_attr();
+							my $class = $token->get_attr('class');
+							print "$trophyn_us $t $asis | tag:$tag class:$class\n";
+						}
+						
+						# metal or unknown
+						#<span class="trophy-icon trophy-type-bronze">
+						#<span class="trophy-icon trophy-type-unknown">
+						if ($token->is_start_tag('span') && $token->get_attr('class') =~ m/trophy-type-(\S+)/) {
+							my $metal = $1;
+							print $metal."\n";
+							$trophies_us{$trophyn_us}{metal} = $metal;
+						}
+						
+						# image or locked
+						#<img title="Let's gear up" alt="Let's gear up" src="the_last_of_us_usa_files/BDF3999478A771D79C603B0B882930D3E827D241.PNG">
+						#<img src="the_last_of_us_usa_files/locked_trophy.png">
+						if ($token->is_start_tag('img') && $token->get_attr('title') ne '') {
+							my $img = $token->get_attr('src');
+							$img =~ s#.*/##;
+							#print $img."\n";
+							$trophies_us{$trophyn_us}{img} = $img;
+						}
+						
+						# trophy name
+						#<h1 class="trophy_name bronze">
+						#Rampage!
+						if ($token->is_start_tag('h1') && $token->get_attr('class') =~ m/trophy_name/) {
+							#print $token->as_is()."\n";
+							my $name = $p->peek(1);
+							print $name."\n";
+							$trophies_us{$trophyn_us}{name} = clean_str($name);
+						}
+						
+						# trophy text
+						#<h2> | tag:h2 class:
+						#Kill 40 hybrids in the Single Player Campaign.
+						if ($token->is_start_tag('h2')) {
+							#print $token->as_is()."\n";
+							my $text = $p->peek(1);
+							print $text."\n";
+							$trophies_us{$trophyn_us}{text} = clean_str($text);
+						}
+						
+						# gamedetails
+						#<div class="GameDetails">
+						#<h6 title="fritxhardy">
+						#fritxhardy
+						#</h6>
+						#<p class="">
+						#Trophy Earned
+						#</p>
+						#<p class="">
+						#January 22, 2010
+						#</p>
+						#<p class="">
+						#06:50:58 PM EST
+						#</p>
+						#</div>
+						if ($token->is_start_tag('div') && $token->get_attr('class') eq 'GameDetails') {
+							#<h6 title="fritxhardy">fritxhardy</h6><p class="">Trophy Earned</p><p class="">January 22, 2010</p><p class="">06:50:58 PM EST</p>
+							my $d = $p->peek(11);
+							print "$d\n";
+							$d =~ s#.*Trophy Earned</p><p class="">##;
+							my ($date,$time) = split(/<\/p><p class="">/,$d);
+							print "$date $time\n";
+							$trophies_us{$trophyn_us}{date} = "$date $time";
+						}
+					}
+					
+					print "\n\n";
+				}
+					exit;
+			}
+		}
+
+		# uk.playstation.com
+		if (m# href="http://uk.playstation.com/"#) {
+			$country eq 'uk';
+		}
+		if ($country eq 'uk') {
+			if (m/div class="gameLevelListItem"/) {
+				$trophyn_uk++;
+			}
+			if ($trophyn_uk) {
+				if (m/div class="gameLevelImage".*src="(.*)"\s+/) {
+					my $img = $1;
+					$img =~ s#.*/## if ($path);
+					$img =~ s/icon_trophy_padlock.gif/trophy_locksmall.png/ if ($img =~ m/icon_trophy_padlock.gif/);
+					$trophies_uk{$trophyn_uk}{img} = $img;
+				}
+				elsif (m/div class="gameLevelTrophyType".*alt="(.*)"/) {
+					my $metal = $1;
+					$metal = uc($metal);
+					$trophies_uk{$trophyn_uk}{metal} = $metal;
+				}
+				elsif (m/<p class="title">(.*)<\/p>/) {
+					$trophies_uk{$trophyn_uk}{text} = clean_str($1);
+				}
+				elsif (m/<p class="date">(.*)<\/p>/) {
+					$trophies_uk{$trophyn_uk}{date} = clean_str($1);
+				}
+				elsif (m/^\s+<p>(.*)<\/p>$/ || m/^\s+<p>(.*)$/) {
+					$trophies_uk{$trophyn_uk}{subtext} = clean_str($1);
+				}
+			}
+		}
+	}
 }
