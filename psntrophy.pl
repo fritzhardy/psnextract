@@ -67,6 +67,7 @@ my %trophy_imgmap = (
 	unknown => '',
 );
 
+my %game;	# stores masthead info
 my %trophies_us;
 my %trophies_uk;
 
@@ -510,128 +511,144 @@ sub scrape_20140607 {
 			if (m/table-overflow-wrapper clearfix/) { # one giant mess of a line
 				my @rows = split(/\<tr class=\"trophy-tr\"\>/,$_);
 				
-				# first row has special stuff we could use to 
-				# auto-create header but we do not care for now
-				my $special = shift(@rows);
-				
-				# it is probably better not to construct a new object over and 
-				# over and instead just parse the whole doc but oh well
+				# Trophy row html blocks follow.  It is probably better not to 
+				# construct a new object over and over and instead just parse 
+				# the whole doc, but since we can isolate the html out of the 
+				# trophy table row-by-row, it is easier to digest, and we 
+				# number trophies by row number besides, so oh well.
+				my $trophyn = 0;
 				foreach my $r (@rows) {
-					$trophyn_us++;
-					
-					print "$r\n\n" if $verbose;	
-					
+					print "$r\n\n" if $verbose > 1;	
 					my $p = HTML::TokeParser::Simple->new(\$r);
-					my $t;
-					while ( my $token = $p->get_token ) {
+					my $tokn = 0;
+					while ( my $tok = $p->get_token ) {
 						if ($verbose > 1) {
-							$t++;
-							my $asis = $token->as_is();
-							my $tag = $token->get_tag();
-							my $hash = $token->get_attr();
-							my $class = $token->get_attr('class');
-							print "$trophyn_us $t $asis | tag:$tag class:$class\n";
+							my $asis = $tok->as_is();
+							my $tag = $tok->get_tag();
+							my $hash = $tok->get_attr();
+							my $class = $tok->get_attr('class');
+							print "$trophyn $tokn $asis | tag:$tag class:$class\n";
 						}
 						
-						# metal or unknown
-						#<span class="trophy-icon trophy-type-bronze">
-						#<span class="trophy-icon trophy-type-unknown">
-						if ($token->is_start_tag('span') && $token->get_attr('class') =~ m/trophy-type-(\S+)/) {
-							my $metal = $1;
-							print $metal."\n";
-							$trophies_us{$trophyn_us}{metal} = $metal;
+						# First row html block is filled with special bits like 
+						# percentage, trophy counts, etc, which we use to build 
+						# the page masthead.
+						if ($trophyn == 0) {
+							# game title and image
+							#<div class="game-image">
+							#<img title="titleTM" alt="titleTM" src="folder/XXX.PNG">
+							if ($tok->is_start_tag('div') && $tok->get_attr('class') eq 'game-image') {
+								my $imgtag = $p->peek(1);
+								$imgtag =~ m/title="(.*)" alt.* src="(.*)"/;
+								my $title = clean_str($1);
+								my $img = clean_str($2);
+								$img =~ s#.*/##;	# eliminate folder path
+								print "DEBUG: gametitle=>$title gameimg=>$img\n";
+								$game{title} = $title;
+								$game{img} = $img;
+							}
+							
+							# game user and avatar
+							#<img title="fritxhardy" alt="fritxhardy" src="folder/XXX.png" class="avatar-image">
+							if ($tok->is_start_tag('img') && $tok->get_attr('class') eq 'avatar-image') {
+								my $user = $tok->get_attr('title');
+								my $avatar = $tok->get_attr('src');
+								$avatar =~ s#.*/##;	# eliminate folder path
+								print "DEBUG: user=>$user avatar=>$avatar\n";
+								$game{user} = $user;
+								$game{avatar} = $avatar;
+							}
+							
+							# trophy counts
+							#<li class="bronze"> ... <li class="silver"> 
+							#XX
+							if ($tok->is_start_tag('li')) {
+								my $metal = $tok->get_attr('class');
+								if (!exists($trophy_imgmap{$metal})) { next; }
+								my $count = $p->peek(1);
+								print "DEBUG: $metal=>$count\n";
+								$game{$metal} = $count;
+							}
+							
+							# progress bar
+							#<div style="width: 16%;" class="slider">
+							if ($tok->is_start_tag('div') && $tok->get_attr('class') eq 'slider') {
+								my $progress = $tok->get_attr('style');
+								$progress =~ s/.* //;
+								$progress =~ s/\%.*//;
+								print "DEBUG: progress=>$progress\n";
+								$game{progress} = $progress;
+							}
 						}
-						
-						# image or locked
-						#<img title="Let's gear up" alt="Let's gear up" src="the_last_of_us_usa_files/BDF3999478A771D79C603B0B882930D3E827D241.PNG">
-						#<img src="the_last_of_us_usa_files/locked_trophy.png">
-						if ($token->is_start_tag('img') && $token->get_attr('title') ne '') {
-							my $img = $token->get_attr('src');
-							$img =~ s#.*/##;
-							#print $img."\n";
-							$trophies_us{$trophyn_us}{img} = $img;
+						else {								
+							# metal or unknown
+							#<span class="trophy-icon trophy-type-bronze">
+							#<span class="trophy-icon trophy-type-unknown">
+							if ($tok->is_start_tag('span') && $tok->get_attr('class') =~ m/trophy-type-(\S+)/) {
+								my $metal = $1;
+								print $metal."\n";
+								$trophies_us{$trophyn}{metal} = $metal;
+							}
+							
+							# image or locked
+							#<img title="Let's gear up" alt="Let's gear up" src="the_last_of_us_usa_files/BDF3999478A771D79C603B0B882930D3E827D241.PNG">
+							#<img src="the_last_of_us_usa_files/locked_trophy.png">
+							if ($tok->is_start_tag('img') && $tok->get_attr('title') ne '') {
+								my $img = $tok->get_attr('src');
+								$img =~ s#.*/##;
+								#print $img."\n";
+								$trophies_us{$trophyn}{img} = $img;
+							}
+							
+							# trophy name
+							#<h1 class="trophy_name bronze">
+							#Rampage!
+							if ($tok->is_start_tag('h1') && $tok->get_attr('class') =~ m/trophy_name/) {
+								#print $tok->as_is()."\n";
+								my $name = $p->peek(1);
+								print $name."\n";
+								$trophies_us{$trophyn}{name} = clean_str($name);
+							}
+							
+							# trophy text
+							#<h2> | tag:h2 class:
+							#Kill 40 hybrids in the Single Player Campaign.
+							if ($tok->is_start_tag('h2')) {
+								#print $tok->as_is()."\n";
+								my $text = $p->peek(1);
+								print $text."\n";
+								$trophies_us{$trophyn}{text} = clean_str($text);
+							}
+							
+							# gamedetails
+							#<div class="GameDetails">
+							#<h6 title="fritxhardy">
+							#fritxhardy
+							#</h6>
+							#<p class="">
+							#Trophy Earned
+							#</p>
+							#<p class="">
+							#January 22, 2010
+							#</p>
+							#<p class="">
+							#06:50:58 PM EST
+							#</p>
+							#</div>
+							if ($tok->is_start_tag('div') && $tok->get_attr('class') eq 'GameDetails') {
+								#<h6 title="fritxhardy">fritxhardy</h6><p class="">Trophy Earned</p><p class="">January 22, 2010</p><p class="">06:50:58 PM EST</p>
+								my $d = $p->peek(11);
+								print "$d\n";
+								$d =~ s#.*Trophy Earned</p><p class="">##;
+								my ($date,$time) = split(/<\/p><p class="">/,$d);
+								print "$date $time\n";
+								$trophies_us{$trophyn}{date} = "$date $time";
+							}
 						}
-						
-						# trophy name
-						#<h1 class="trophy_name bronze">
-						#Rampage!
-						if ($token->is_start_tag('h1') && $token->get_attr('class') =~ m/trophy_name/) {
-							#print $token->as_is()."\n";
-							my $name = $p->peek(1);
-							print $name."\n";
-							$trophies_us{$trophyn_us}{name} = clean_str($name);
-						}
-						
-						# trophy text
-						#<h2> | tag:h2 class:
-						#Kill 40 hybrids in the Single Player Campaign.
-						if ($token->is_start_tag('h2')) {
-							#print $token->as_is()."\n";
-							my $text = $p->peek(1);
-							print $text."\n";
-							$trophies_us{$trophyn_us}{text} = clean_str($text);
-						}
-						
-						# gamedetails
-						#<div class="GameDetails">
-						#<h6 title="fritxhardy">
-						#fritxhardy
-						#</h6>
-						#<p class="">
-						#Trophy Earned
-						#</p>
-						#<p class="">
-						#January 22, 2010
-						#</p>
-						#<p class="">
-						#06:50:58 PM EST
-						#</p>
-						#</div>
-						if ($token->is_start_tag('div') && $token->get_attr('class') eq 'GameDetails') {
-							#<h6 title="fritxhardy">fritxhardy</h6><p class="">Trophy Earned</p><p class="">January 22, 2010</p><p class="">06:50:58 PM EST</p>
-							my $d = $p->peek(11);
-							print "$d\n";
-							$d =~ s#.*Trophy Earned</p><p class="">##;
-							my ($date,$time) = split(/<\/p><p class="">/,$d);
-							print "$date $time\n";
-							$trophies_us{$trophyn_us}{date} = "$date $time";
-						}
+						$tokn++;
 					}
-					
+					$trophyn++;
 					print "\n\n";
-				}
-					exit;
-			}
-		}
-
-		# uk.playstation.com
-		if (m# href="http://uk.playstation.com/"#) {
-			$country eq 'uk';
-		}
-		if ($country eq 'uk') {
-			if (m/div class="gameLevelListItem"/) {
-				$trophyn_uk++;
-			}
-			if ($trophyn_uk) {
-				if (m/div class="gameLevelImage".*src="(.*)"\s+/) {
-					my $img = $1;
-					$img =~ s#.*/## if ($path);
-					$img =~ s/icon_trophy_padlock.gif/trophy_locksmall.png/ if ($img =~ m/icon_trophy_padlock.gif/);
-					$trophies_uk{$trophyn_uk}{img} = $img;
-				}
-				elsif (m/div class="gameLevelTrophyType".*alt="(.*)"/) {
-					my $metal = $1;
-					$metal = uc($metal);
-					$trophies_uk{$trophyn_uk}{metal} = $metal;
-				}
-				elsif (m/<p class="title">(.*)<\/p>/) {
-					$trophies_uk{$trophyn_uk}{text} = clean_str($1);
-				}
-				elsif (m/<p class="date">(.*)<\/p>/) {
-					$trophies_uk{$trophyn_uk}{date} = clean_str($1);
-				}
-				elsif (m/^\s+<p>(.*)<\/p>$/ || m/^\s+<p>(.*)$/) {
-					$trophies_uk{$trophyn_uk}{subtext} = clean_str($1);
 				}
 			}
 		}
