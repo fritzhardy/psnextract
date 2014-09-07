@@ -7,18 +7,19 @@
 use strict;
 use Getopt::Long;
 use HTML::TokeParser::Simple;
+use File::Copy;
 
 my $script_name = $0; $script_name =~ s/.*\///;
 my $usage = sprintf <<EOT;
 $script_name OPTIONS --us|--uk=/psn.html
-	-a, --addendum=/path/to/addendum
-		flat text file of game and trophy addendums and corrections
 	-d, --dryrun
 		show what would be done
 	-h, --help
 		this help message
 	-i, --include=/path/to/include/graphics
 		path to provided graphics when building web
+	-o, --override=/path/to/override
+		flat text file of game and trophy overrides and corrections
 	--uk=/path/to/uk_psn.html
 		path to uk_psn save-as-webpage html (files directory derived)
 	--us=/path/to/us_psn.html
@@ -40,19 +41,19 @@ cat game_trophies.html | $script_name -p -w "title,banner,captions.txt" > index.
 EOT
 
 my $num_args = scalar(@ARGV);
-my $addendum;
 my $dryrun;
 my $help;
 my $include;
+my $override;
 my $uk;	# path to uk html file
 my $us;	# path to us html file
 my $verbose;
 my $web;
 my $getopt = GetOptions(
-	"addendum=s"=>\$addendum,
 	"dryrun"=>\$dryrun,
 	"help"=>\$help,
 	"include=s"=>\$include,
+	"override=s"=>\$override,
 	"uk=s"=>\$uk,
 	"us=s"=>\$us,
 	"verbose+"=>\$verbose,
@@ -64,94 +65,84 @@ if ($help || !$num_args) {
 	die $usage;
 }
 if (!$us && !$uk) {
-	die "Error: Require one of us or uk else nothing to do.\n\n$usage";	
+	die "Error: Require one or both of --us or --uk else nothing to do.\n\n$usage";	
 }
 
-# global hash of trophy types to filename
-my %trophy_imgmap = (
+# global hash of trophy to mini filename
+my %trophy_mini = (
+	unknown => '',							# no mini icon
 	default => 'trophy_mini_default.png',	# faded, unearned
 	bronze => 'trophy_mini_bronze.png',
 	silver => 'trophy_mini_silver.png',
 	gold => 'trophy_mini_gold.png',
 	platinum => 'trophy_mini_platinum.png',
-	unknown => '',
 );
 
-# global hash into which game info gleaned from 
-# us and uk scrapes is stored for use in the web masthead
+# global hash of trophy to image filename
+my %trophy_small = (
+	locked => 'trophy_small_locked.png',		# unearned
+);
+
+# global hash into which sub-hashes containing trophy info 
+# gleaned from us, uk, and overrides are stored for use in web body
+# %trophies{us} %trophies{uk} %trophies{override} %trophies{final}
+my %trophies;
+
+# global hash into which sub-hashes containing game info 
+# gleaned from us, uk, and overrides are stored for use in web masthead
+# %game{us} %game{uk} %game{override} %game{final}
 my %game;
 
-# build us/uk hashes from html save-as-webpage data
-my %trophies_us = scrape_us_psn_20140607($us) if $us;
-my %trophies_uk = scrape_uk_psn_20140607($uk) if $uk;
-
-# build addendums hash from local file
-my %trophies_add = parse_trophy_addendum($addendum) if ($addendum);
-
-# continue to see the following:
-# us: datestamps, bigger trophy graphics, often misses dlc
-# uk: dlc, no datestamps
-# add: local file to add datestamps and other gamedata
-# therefore we overlay for precedence: uk -> us -> add
-my %trophies;
-if (%trophies_uk) {
-	foreach my $n (sort {$a <=> $b} (keys(%trophies_uk))) {
-		if ($verbose) {
-			#print STDERR "$_:${$trophies_uk{$_}}{img}:\n";
-			my %trophy = %{$trophies_uk{$n}};
-			foreach (sort(keys(%trophy))) {
-				print "UK: $n $_=>$trophy{$_}\n";
+main: {
+	# build us/uk hashes from html save-as-webpage data
+	scrape_us_psn_20140607($us) if $us;
+	scrape_uk_psn_20140607($uk) if $uk;
+	
+	# build addendums hash from local file
+	parse_overrides($override) if ($override);
+	
+	# continue to see the following:
+	# us: datestamps, bigger trophy graphics, often misses dlc
+	# uk: usually dlc, no datestamps
+	# override: local file to add datestamps and other gamedata
+	# therefore we overlay for precedence: uk -> us -> overrides
+	merge_gamedata();
+	merge_trophies();
+	
+	# pure debugging final result
+	if ($verbose) {
+		if ($game{final} && $verbose) {
+			foreach my $a (sort (keys(%{$game{final}}))) {
+				print "$a=>${$game{final}}{$a}\n";
 			}
 			print "\n";
 		}
-		$trophies{$n} = $trophies_uk{$n};
-	}
-}
-if (%trophies_us) {
-	foreach my $n (sort {$a <=> $b} (keys(%trophies_us))) {
-		if ($verbose) {
-			#print STDERR "$_:${$trophies_us{$_}}{img}:\n";
-			my %trophy = %{$trophies_us{$n}};
-			foreach (sort(keys(%trophy))) {
-				print "US: $n $_=>$trophy{$_}\n";	
+		if ($trophies{final} && $verbose) {
+			my %trophies = %{$trophies{final}};
+			foreach my $n (sort {$a <=> $b} (keys(%trophies))) {
+				print "$n\n";
+				#print "\t".$trophies{$_}{img}."\n";
+				#print "\t".$trophies{$_}{title}."\n";
+				my %trophy = %{$trophies{$n}};
+				foreach (sort(keys(%trophy))) {
+					print "  $_=>$trophy{$_}\n";
+				}
+				print "\n";
 			}
-			print "\n";
 		}
-		$trophies{$n} = $trophies_us{$n};
 	}
+	
+	# build web directory and copy source graphics
+	build_web ($web,$game{final},$trophies{final},$include) if $web; #&& !$nocopy
+	
+	# write html into web directory
+	write_html ($web,$game{final},$trophies{final}) if $web;
 }
-if (%trophies_add) {
-	foreach my $n (sort {$a <=> $b} (keys(%trophies_add))) {
-		my %trophy = %{$trophies_add{$n}};
-		foreach (sort(keys(%trophy))) {
-			print "AD: $n $_=>$trophy{$_}\n" if $verbose;
-			$trophies{$n}{$_} = $trophy{$_};	# apply individual attr value
-		}
-		print "\n" if $verbose;
-	}
-}
-
-# pure debugging final result
-if ($verbose) {
-	foreach my $n (sort {$a <=> $b} (keys(%trophies))) {
-		print "$n\n";
-		#print "\t".$trophies{$_}{img}."\n";
-		#print "\t".$trophies{$_}{title}."\n";
-		my %trophy = %{$trophies{$n}};
-		foreach (sort(keys(%trophy))) {
-			print "  $_=>$trophy{$_}\n";
-		}
-		print "\n";
-	}
-}
-
-# build a nice web page
-build_web ($web,\%game,\%trophies,$include) if $web;
 
 sub build_web {
 	my ($web,$game,$trophies,$include) = @_;
 	
-	my ($title,$caption);
+	my %trophies = %$trophies;
 	
 	if (-e $web && ! -d $web) {
 		die "ERROR: $web already exists and is not a directory, exiting\n";	
@@ -167,172 +158,47 @@ sub build_web {
 		mkdir($web) or die "ERROR: Cannot mkdir $web: $!\n";
 	}
 	
-	open (my $out,">$web/index.html") or die "ERROR: Cannot write $web/index.html: $!\n";
-#	my $caption = '&nbsp';
-#	if (-f $captions) {
-#		$/ = undef;
-#		open (FH,$captions) or warn "Cannot open $captions: $!\n";
-#		$caption = <FH>;
-#		close (FH);
-#		$/ = "\n";
-#		$caption =~ s/\n/<br>\n/g;
-#	}
-print $out <<EOT;
-<html>
-<head>
-<title>$title</title>
-<style type="text/css">
-.table {
-	width: 780px;
-	font-family: Helvetica;
-	background-color: #f5f5f5;
-}
-.bannerrow {
-	clear: both;
-	width: 780px;
-	min-height: 96px;
-	border-top: 2px solid #dddddd;
-	border-bottom: 2px solid #dddddd;
-}
-.captionrow {
-	clear: both;
-	width: 780px;
-	min-height: 2px;
-	border-bottom: 2px solid #dddddd;
-}
-.captiontext {
-	margin: 5px 5px 5px 5px;
-	text-align: left;
-	font-size: 12px;
-	font-weight: normal;
-}
-.trophyrow {
-	clear: both;
-	width: 780px;
-	min-height: 59px;
-	margin: 0px 0px 0px 0px;
-	border-bottom: 2px solid #dddddd;
-	overflow: hidden;
-}
-.trophyimage {
-	float: left;	
-}
-.trophyimage img {
-	float: left;
-	width: 50px;
-	height: 50px;
-	margin: 5px 5px 5px 5px;
-}
-.trophytitle {
-	float: left;
-	width: 300px;
-	margin: 5px 5px 5px 5px;	
-}
-.trophyname {
-	margin: 0px 0px 0px 0px;
-	text-align: left;
-	font-size: 13px;
-	font-weight: bold;
-}
-.trophytext {
-	font-size: 10px;
-	font-weight: normal;
-}
-.trophydate {
-	float: left;
-	width: 218px;
-	margin: 5px 5px 5px 5px;
-	font-size: 12px;	
-}
-.trophygrid {
-	float: left;
-	width: 150px;
-	margin: 5px 5px 5px 5px;
-}
-.trophyicon {
-	float: left;
-	width: 26px;
-	margin: 0px 10px 0px 0px;
-}
-</style>
-<body>
-<div class="table">
-<div class="bannerrow">
-EOT
-
-print $out "$game{title} $game{img} $game{user} $game{avatar} bronze:$game{bronze} silver:$game{silver} gold:$game{gold} platinum:$game{platinum} progress:$game{progress}\n";
-
-print $out <<EOT;
-</div>
-<div class="captionrow">
-	<span class="captiontext">$caption</span>
-</div>
-EOT
-
-foreach (sort {$a <=> $b} (keys(%trophies))) {
-	my %trophy = %{$trophies{$_}};
-	print $out "<div class=\"trophyrow\">\n";
-	print $out "\t<div class=\"trophyimage\"><img src=\"".$trophy{img}."\" alt=\"".$trophy{text}."\" title=\"".$trophy{text}."\"></div>\n";
-	print $out "\t<div class=\"trophytitle\"><span class=\"trophyname\">".$trophy{name}."</span><br><span class=\"trophytext\">".$trophy{text}."</span></div>\n";
+	# lookup hash to store save-as-html file to its accompanying 
+	# files directory in order to find source directory when copying images
+	my %sources;
+	my $us_files = $us;	# resistance_2_us.html
+	$us_files =~ s/\.html/_files/;	# resistance_2_us_files, assuming firefox behavior
+	$sources{$us} = $us_files;
 	
-	print $out "\t<div class=\"trophydate\">".$trophy{date}."</div>\n";
+	my $uk_files = $uk;	# resistance_2_uk.html
+	$uk_files =~ s/\.html/_files/;	# resistance_2_uk_files, assuming firefox behavior
+	$sources{$uk} = $uk_files;
 	
-	print $out "\t<div class=\"trophygrid\">\n";
-	print $out print_trophy_grid($out,$trophy{metal},$trophy{date});
-	print $out "\t</div>\n";
-#	if ($trophy{date}) {
-#		print "\t<div class=\"trophydate\">".$trophy{date}."</div>\n";
-#		print "\t<div class=\"trophyicon\"><img src=\"".$trophy_imgmap{$trophy{metal}}."\" alt=\"".$trophy{metal}."\" title=\"".$trophy{metal}."\"></div>\n";
-#	} else {
-#		print "\t<div class=\"trophydate\">&nbsp;</div>\n";
-#		print "\t<div class=\"trophyicon\"><img src=\"".$trophy_imgmap{DEFAULT}."\" alt=\"".$trophy{metal}."\" title=\"".$trophy{metal}."\"></div>\n";
-#	}
-	print $out "</div>\n";
-}
-
-print $out <<EOT;
-</div>
-</body>
-</html>
-EOT
-}
-
-sub parse_trophy_corrections {
-	my ($corrections) = @_;
-	my %corrections;
-	open (FH,$corrections) or die "Cannot open $corrections: $!\n";
-	while (<FH>) {
-		chomp();
-		my ($trophynum,@atoms) = split(/\|/,$_);
-		foreach (@atoms) {
-			my ($attr,$val) = split(/\=/,$_);
-			$corrections{$trophynum}{$attr} = $val;
+	foreach (sort(keys(%sources))) {
+		print "$_ $sources{$_}\n";	
+	}
+	
+	# rsync contents of include directory
+	if ($include) {
+		print "rsync -a $include/ $web: " if $verbose;
+		my @rsyncopts = ('-a');
+		push (@rsyncopts,'-v') if $verbose;
+		my $ret = system("rsync",@rsyncopts,$include."/",$web); $ret >>= 8;
+		print "$ret\n" if $verbose;
+	}
+	
+	# copy game images
+	foreach my $attr ('img','avatar') {
+		if ($game{us}{$attr}) {
+			print "cp -a $sources{$us}/$game{us}{$attr} $web: " if $verbose;
+			my $ret = system("cp","-a","$sources{$us}/$game{us}{$attr}", $web); $ret >>= 8;
+			print "$ret\n" if $verbose;
 		}
 	}
-	close (FH);
-	return %corrections;
-}
 	
-
-sub print_trophy_grid {
-	my ($metal,$date) = @_;
-	my $trophy_icon = $date ? $trophy_imgmap{$metal} : $trophy_imgmap{DEFAULT};
-	
-	my %metal_weight = (
-		DEFAULT => 0,
-		BRONZE => 1,
-		SILVER => 2,
-		GOLD => 3,
-		PLATINUM => 4,
-	);
-	
-	for (my $t = 1; $t <= 4; $t++) {
-		if ($t == $metal_weight{$metal}) {
-			return "\t\t<div class=\"trophyicon\"><img src=\"".$trophy_icon."\" alt=\"".$metal."\" title=\"".$metal."\"></div>\n";
-		} else {
-			return "\t\t<div class=\"trophyicon\">&nbsp;</div>\n";
-		}
-	} 
+	# copy trophy images
+	foreach my $n (sort {$a <=> $b} (keys(%trophies))) {
+		my %trophy = %{$trophies{$n}};
+		next if !$trophy{img};
+		print "cp -a $sources{$trophy{src}}/$trophy{img} $web: " if $verbose;
+		my $ret = system("cp","-a","$sources{$trophy{src}}/$trophy{img}",$web); $ret >>= 8;
+		print "$ret\n" if $verbose;
+	}
 }
 
 sub clean_str {
@@ -354,6 +220,109 @@ sub clean_str {
 		$last_ord = $ord;
 	}
 	return $clean_str;
+}
+
+sub merge_gamedata {
+	# uk
+	if ($game{uk}) {
+		my %game_uk = %{$game{uk}};
+		foreach my $a (sort(keys(%game_uk))) {
+			print "UK: $a=>$game_uk{$a}\n" if $verbose > 1;
+			$game{final}{$a} = $game_uk{$a};
+		}
+		print "\n" if $verbose > 1;
+	}
+	# us
+	if ($game{us}) {
+		my %game_us = %{$game{us}};
+		foreach my $a (sort(keys(%game_us))) {
+			print "US: $a=>$game_us{$a}\n" if $verbose > 1;
+			$game{final}{$a} = $game_us{$a};
+		}
+		print "\n" if $verbose > 1;
+	}
+	# overrides
+	if ($game{override}) {
+		my %game_over = %{$game{override}};
+		foreach my $a (sort(keys(%game_over))) {
+			print "OVER: $a=>$game_over{$a}\n" if $verbose > 1;
+			$game{final}{$a} = $game_over{$a};
+		}
+		print "\n" if $verbose > 1;
+	}
+}
+
+sub merge_trophies {
+	# uk
+	if ($trophies{uk}) {
+		my %trophies_uk = %{$trophies{uk}};
+		foreach my $n (sort {$a <=> $b} (keys(%trophies_uk))) {
+			if ($verbose) {
+				#print STDERR "$_:${$trophies_uk{$_}}{img}:\n";
+				my %trophy = %{$trophies_uk{$n}};
+				foreach (sort(keys(%trophy))) {
+					print "UK: $n $_=>$trophy{$_}\n" if $verbose > 1;
+				}
+				print "\n" if $verbose > 1;
+			}
+			$trophies{final}{$n} = $trophies_uk{$n};
+		}
+	}
+	# us
+	if ($trophies{us}) {
+		my %trophies_us = %{$trophies{us}};
+		foreach my $n (sort {$a <=> $b} (keys(%trophies_us))) {
+			if ($verbose) {
+				#print STDERR "$_:${$trophies_us{$_}}{img}:\n";
+				my %trophy = %{$trophies_us{$n}};
+				foreach (sort(keys(%trophy))) {
+					print "US: $n $_=>$trophy{$_}\n" if $verbose > 1;	
+				}
+				print "\n" if $verbose > 1;
+			}
+			$trophies{final}{$n} = $trophies_us{$n};
+		}
+	}
+	# overrides
+	if ($trophies{override}) {
+		my %trophies_over = %{$trophies{override}};
+		foreach my $n (sort {$a <=> $b} (keys(%trophies_over))) {
+			my %trophy = %{$trophies_over{$n}};
+			foreach (sort(keys(%trophy))) {
+				print "OVER: $n $_=>$trophy{$_}\n" if $verbose > 1;
+				$trophies{final}{$n}{$_} = $trophy{$_};	# apply individual attr value
+			}
+		}
+		print "\n" if $verbose > 1;
+	}
+}
+
+sub parse_overrides {
+	my ($override) = @_;
+	#game|title=>Resistance 2: The Sequel to Resistance 1, Followed by Resistance 3
+	#game|user=>wasntme69
+	#1|name=>Platinum Baby
+	#1|date=>Never
+	#32|date=>Fri Jul 02 21:29:00 EDT 2010
+	#33|name=>Something Else
+	#33|date=>Fri Jul 09 22:17:00 EDT 2010
+	#99|name=>Imaginary
+	open (FH,$override) or die "Cannot open $override: $!\n";
+	while (<FH>) {
+		chomp();
+		my ($object,@atoms) = split(/\|/,$_);
+		foreach (@atoms) {
+			my ($attr,$val) = split(/\=>/,$_);
+			if ($object eq 'game') {
+				print "OVERRIDE $attr=>$val\n" if $verbose > 2;
+				$game{override}{$attr} = $val;
+			} else {
+				print "OVERRIDE $object $attr=>$val\n" if $verbose > 2;
+				$trophies{override}{$object}{$attr} = $val;	# store by number
+			}
+		}
+	}
+	close (FH);
 }
 
 # 2014-06-07 UK
@@ -445,14 +414,13 @@ sub scrape_us_psn_20140607 {
 	
 	# Trophy row html blocks follow.  It is probably better not to 
 	# construct a new object over and over and instead just parse 
-	# the whole doc, but since we have isolate the html out of the 
+	# the whole doc, but since we have isolated the html out of the 
 	# trophy table row-by-row, it is easier to digest, and we 
 	# number trophies by row number besides, so oh well.
 	my @rows = split(/\<tr class=\"trophy-tr\"\>/,$htmlstr);
-	my %trophies;
 	my $trophyn = 0;
 	foreach my $r (@rows) {
-		print "$r\n\n" if $verbose > 3;	
+		print "$r\n\n" if $verbose > 2;	
 		my $p = HTML::TokeParser::Simple->new(\$r);
 		my $tokn = 0;
 		while ( my $tok = $p->get_token ) {
@@ -464,9 +432,9 @@ sub scrape_us_psn_20140607 {
 				print "$trophyn $tokn $asis | tag:$tag class:$class\n";
 			}
 			
-			# First row html block is filled with special bits like 
-			# percentage, trophy counts, etc, which we stuff into the 
-			# global %game hash for use in the masthead.
+			# First row html block is actually the trophy table header, and is 
+			# filled with special bits like percentage, trophy counts, etc, 
+			# which we stuff into the global %game hash for use in the masthead.
 			if ($trophyn == 0) {
 				# game title and image
 				#<div class="game-image">
@@ -477,9 +445,9 @@ sub scrape_us_psn_20140607 {
 					my $title = clean_str($1);
 					my $img = clean_str($2);
 					$img =~ s#.*/##;	# eliminate folder path
-					print "SCRAPE_US gametitle=>$title gameimg=>$img\n" if $verbose > 1;
-					$game{title} = $title;
-					$game{img} = $img;
+					print "SCRAPE_US title=>$title img=>$img\n" if $verbose > 2;
+					$game{us}{title} = $title;
+					$game{us}{img} = $img;
 				}
 				
 				# game user and avatar
@@ -488,9 +456,9 @@ sub scrape_us_psn_20140607 {
 					my $user = $tok->get_attr('title');
 					my $avatar = $tok->get_attr('src');
 					$avatar =~ s#.*/##;	# eliminate folder path
-					print "SCRAPE_US user=>$user avatar=>$avatar\n" if $verbose > 1;
-					$game{user} = $user;
-					$game{avatar} = $avatar;
+					print "SCRAPE_US user=>$user avatar=>$avatar\n" if $verbose > 2;
+					$game{us}{user} = $user;
+					$game{us}{avatar} = $avatar;
 				}
 				
 				# trophy counts
@@ -500,10 +468,10 @@ sub scrape_us_psn_20140607 {
 				#2
 				if ($tok->is_start_tag('li')) {
 					my $metal = $tok->get_attr('class');
-					if (!exists($trophy_imgmap{$metal})) { next; }
+					if (!exists($trophy_mini{$metal})) { next; }
 					my $count = $p->peek(1);
-					print "SCRAPE_US $metal=>$count\n" if $verbose > 1;
-					$game{$metal} = $count;
+					print "SCRAPE_US $metal=>$count\n" if $verbose > 2;
+					$game{us}{$metal} = $count;
 				}
 				
 				# progress bar
@@ -512,18 +480,27 @@ sub scrape_us_psn_20140607 {
 					my $progress = $tok->get_attr('style');
 					$progress =~ s/.* //;
 					$progress =~ s/\%.*//;
-					print "SCRAPE_US progress=>$progress\n" if $verbose > 1;
-					$game{progress} = $progress;
+					print "SCRAPE_US progress=>$progress\n" if $verbose > 2;
+					$game{us}{progress} = $progress;
 				}
 			}
-			else {		
+			else {
+#				# locked or unlocked
+#				#<td class="trophy-td trophy-unlocked-false">
+#				#<td class="trophy-td trophy-unlocked-true">
+#				if ($tok->is_start_tag('td') && $tok->get_attr('class') =~ m/trophy-unlocked-(\S+)/) {
+#					my $locked = $1 eq 'false' ? 1 : 0;	# reversal of sense
+#					print "SCRAPE_US $trophyn locked=>$locked\n" if $verbose > 2;
+#					$trophies{$trophyn}{locked} = $locked;
+#				}
+					
 				# metal or unknown
 				#<span class="trophy-icon trophy-type-bronze">
 				#<span class="trophy-icon trophy-type-unknown">
 				if ($tok->is_start_tag('span') && $tok->get_attr('class') =~ m/trophy-type-(\S+)/) {
 					my $metal = $1;
-					print "SCRAPE_US $trophyn metal=>$metal\n" if $verbose > 1;
-					$trophies{$trophyn}{metal} = $metal;
+					print "SCRAPE_US $trophyn metal=>$metal\n" if $verbose > 2;
+					$trophies{us}{$trophyn}{metal} = $metal;
 				}
 				
 				# image or locked
@@ -532,8 +509,8 @@ sub scrape_us_psn_20140607 {
 				if ($tok->is_start_tag('img') && $tok->get_attr('title') ne '') {
 					my $img = $tok->get_attr('src');
 					$img =~ s#.*/##;	# eliminate folder path
-					print "SCRAPE_US $trophyn img=>$img\n" if $verbose > 1;
-					$trophies{$trophyn}{img} = $img;
+					print "SCRAPE_US $trophyn img=>$img\n" if $verbose > 2;
+					$trophies{us}{$trophyn}{img} = $img;
 				}
 				
 				# trophy name
@@ -542,8 +519,8 @@ sub scrape_us_psn_20140607 {
 				if ($tok->is_start_tag('h1') && $tok->get_attr('class') =~ m/trophy_name/) {
 					#print $tok->as_is()."\n";
 					my $name = $p->peek(1);
-					print "SCRAPE_US $trophyn name=>$name\n" if $verbose > 1;
-					$trophies{$trophyn}{name} = clean_str($name);
+					print "SCRAPE_US $trophyn name=>$name\n" if $verbose > 2;
+					$trophies{us}{$trophyn}{name} = clean_str($name);
 				}
 				
 				# trophy text
@@ -552,8 +529,8 @@ sub scrape_us_psn_20140607 {
 				if ($tok->is_start_tag('h2')) {
 					#print $tok->as_is()."\n";
 					my $text = $p->peek(1);
-					print "SCRAPE_US $trophyn text=>$text\n" if $verbose > 1;
-					$trophies{$trophyn}{text} = clean_str($text);
+					print "SCRAPE_US $trophyn text=>$text\n" if $verbose > 2;
+					$trophies{us}{$trophyn}{text} = clean_str($text);
 				}
 				
 				# trophy gamedetails
@@ -576,22 +553,313 @@ sub scrape_us_psn_20140607 {
 					my $dat = $p->peek(11);
 					$dat =~ s#.*Trophy Earned</p><p class="">##;
 					my ($date,$time) = split(/<\/p><p class="">/,$dat);
-					print "SCRAPE_US $trophyn date=>$date $time\n" if $verbose > 1;
-					$trophies{$trophyn}{date} = "$date $time";
+					print "SCRAPE_US $trophyn date=>$date $time\n" if $verbose > 2;
+					$trophies{us}{$trophyn}{date} = "$date $time";
 				}
 			}
 			$tokn++;
 		}
-		# track the trophy source in case it is overlaid later
+		# track the source file for this trophy for later copying 
+		# and in case it is overlaid later
 		unless ($trophyn == 0) {
-			print "SCRAPE_US $trophyn src=>$us\n" if $verbose > 1;
-			$trophies{$trophyn}{src} = $us;
+			print "SCRAPE_US $trophyn src=>$us\n" if $verbose > 2;
+			$trophies{us}{$trophyn}{src} = $us;
 		} 
 		
 		$trophyn++;
-		print "\n\n" if $verbose > 1;
+		print "\n\n" if $verbose > 2;
 	}
-	return %trophies;
+}
+
+sub write_html {
+	my ($web,$game,$trophies) = @_;
+	my %trophies = %$trophies;
+	my ($title,$caption);
+	
+	my $ttot = $game{us}{platinum}+$game{us}{gold}+$game{us}{silver}+$game{us}{bronze};
+	
+	open (my $out,">$web/index.html") or die "ERROR: Cannot write $web/index.html: $!\n";
+#	my $caption = '&nbsp';
+#	if (-f $captions) {
+#		$/ = undef;
+#		open (FH,$captions) or warn "Cannot open $captions: $!\n";
+#		$caption = <FH>;
+#		close (FH);
+#		$/ = "\n";
+#		$caption =~ s/\n/<br>\n/g;
+#	}
+	print $out <<EOT;
+<html>
+<head>
+<title>$title</title>
+<style type="text/css">
+.table {
+	width: 780px;
+	font-family: Helvetica;
+	background-color: #f5f5f5;
+}
+.bannerrow {
+	clear: both;
+	width: 780px;
+	height: 100px;
+	border-top: 2px solid #dddddd;
+	border-bottom: 2px solid #dddddd;
+}
+.gamegraphic {
+	float: left;
+	#border-right: 2px solid #ffffff;
+	width: 220px;
+	height: 100%;
+}
+.gameinfo {
+	float: left;
+	#border: 2px solid #ffffff;
+	width: 340px;
+	height: 100%;
+	position: relative;
+}
+.gameinfo_title {
+	font: 700 6.25em Helvetica;
+	font-size: 24px;
+	text-align: center;
+	margin-top: 6px;
+	text-shadow: 1px 1px 0 rgb(223, 227, 229), 2px 2px 0 rgba(0, 0, 0, 0.25);
+	color: #3f3f3f;
+}
+.gameinfo_avatar {
+	position: absolute;
+	left: 5px;
+	bottom: 5px;
+}
+.gameinfo_user {
+	font-size: 12px;
+	position: absolute;
+	left: 30px;
+	bottom: 8px;
+}
+.gameinfo_progressbar {
+	height: 10px;
+	width: 150px;
+	float: left;
+	overflow: hidden;
+	background: #ffffff;
+	border: 1px solid #808080;
+	position: absolute;
+	right: 30px;
+	bottom: 8px;
+}
+.gameinfo_progressslider {
+	height: 8px;
+	margin: 1px 1px 1px 1px;
+	background-color: #0068bf;
+}
+.gameinfo_progresstext {
+	height: 8px;
+	float: left;
+	font-size: 12px;
+	position: absolute;
+	right: 1px;
+	bottom: 14px;
+}
+.gametrophygraph {
+	float: left;
+	#border: 2px solid #ffffff;
+	width: 220px;
+	height: 100%;
+	position: relative;
+}
+.gametrophygraph_bar {
+	height: 16px;
+	margin-top: 0px;
+	margin-bottom: 1px;
+	position: absolute;
+	right: 6px;
+	border: 1px solid #e6e6e6;
+	background: -webkit-linear-gradient(#fdfcfd, #dfdfdf); /* For Safari 5.1 to 6.0 */
+	background: -o-linear-gradient(#fdfcfd, #dfdfdf); /* For Opera 11.1 to 12.0 */
+	background: -moz-linear-gradient(#fdfcfd, #dfdfdf); /* For Firefox 3.6 to 15 */
+	background: linear-gradient(#fdfcfd, #dfdfdf); /* Standard syntax (must be last) */
+	font-size: 11px;
+}
+.gametrophygraph_mini {
+	margin-top: 0px;
+	margin-bottom: 0px;
+	position: absolute;	
+}
+.gametrophygraph_total {
+	position: absolute;
+	right: 12;
+	bottom: 6;
+	font-size: 26px;
+	#color: #3f3f3f;
+	text-shadow: 0 2px 3px rgba(255, 255, 255, 0.3), 0 -1px 2px rgba(0, 0, 0, 0.2);
+	#text-shadow: 0 -4px 3px rgba(255, 255, 255, 0.3), 0 3px 4px rgba(0, 0, 0, 0.2);
+	color: #ffffff;
+}
+.captionrow {
+	clear: both;
+	width: 780px;
+	min-height: 2px;
+	border-bottom: 2px solid #dddddd;
+}
+.captiontext {
+	margin: 5px 5px 5px 5px;
+	text-align: left;
+	font-size: 12px;
+	font-weight: normal;
+}
+.trophyrow {
+	clear: both;
+	width: 780px;
+	min-height: 59px;
+	margin: 0px 0px 0px 0px;
+	border-bottom: 2px solid #dddddd;
+	overflow: hidden;
+}
+.trophyimage {
+	float: left;	
+}
+.trophyimage img {
+	float: left;
+	width: 50px;
+	height: 50px;
+	margin: 5px 5px 5px 5px;
+}
+.trophytitle {
+	float: left;
+	width: 300px;
+	margin: 5px 5px 5px 5px;	
+}
+.trophyname {
+	margin: 0px 0px 0px 0px;
+	text-align: left;
+	font-size: 13px;
+	font-weight: bold;
+}
+.trophytext {
+	font-size: 10px;
+	font-weight: normal;
+}
+.trophydate {
+	float: left;
+	width: 218px;
+	margin: 5px 5px 5px 5px;
+	font-size: 12px;	
+}
+.trophygrid {
+	float: left;
+	width: 150px;
+	margin: 5px 5px 5px 5px;
+}
+.trophyicon {
+	float: left;
+	width: 26px;
+	margin: 0px 10px 0px 0px;
+	#border-top: 1px solid #000000;
+}
+</style>
+<body>
+<div class="table">
+<div class="bannerrow">
+EOT
+
+	#print $out "$game{final}{title} $game{final}{img} $game{final}{user} $game{final}{avatar} bronze:$game{final}{bronze} silver:$game{final}{silver} gold:$game{final}{gold} platinum:$game{final}{platinum} progress:$game{final}{progress}\n";
+
+	print $out "\t<div class=\"gamegraphic\">\n";	
+	print $out "\t\t<img src=\"$game{final}{img}\" title=\"$game{final}{title}\" alt=\"$game{final}{title}\" width=\"180\" height=\"99\">\n";
+	print $out "\t</div>\n";
+	
+	print $out "\t<div class=\"gameinfo\">\n";
+	
+	print $out "\t\t<div class=\"gameinfo_title\">\n";
+	print $out "\t\t\t$game{final}{title}<br>\n";
+	print $out "\t\t</div>\n";
+	
+	print $out "\t\t<div class=\"gameinfo_avatar\">\n";
+	print $out "\t\t\t<img src=\"$game{final}{avatar}\" title=\"$game{final}{user}\" alt=\"$game{final}{user}\" width=\"25\" height=\"25\">\n";
+	print $out "\t\t</div>\n";
+	
+	print $out "\t\t<div class=\"gameinfo_user\">\n";
+	print $out "\t\t$game{final}{user}\n";
+	print $out "\t\t</div>\n";
+	
+	print $out "\t\t<div class=\"gameinfo_progressbar\">\n";
+	print $out "\t\t\t<div class=\"gameinfo_progressslider\" style=\"width: $game{final}{progress}%\"></div>\n";
+	print $out "\t\t</div>\n";
+	print $out "\t\t<div class=\"gameinfo_progresstext\">$game{final}{progress}%</div>\n";
+	
+	print $out "\t</div>\n";
+	
+	print $out "\t<div class=\"gametrophygraph\">\n";
+	print $out "\t\t<div class=\"gametrophygraph_mini\" style=\"right:41px;bottom:66px;\"><img src=\"trophy_mini_platinum.png\"></div>\n";
+	print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:61px;bottom:52px;\">$game{final}{platinum} Platinum</div>\n";
+	print $out "\t\t<div class=\"gametrophygraph_mini\" style=\"right:77px;bottom:50px;\"><img src=\"trophy_mini_gold.png\"></div>\n";
+	print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:97px;bottom:36px;\">$game{final}{gold} Gold</div>\n";
+	print $out "\t\t<div class=\"gametrophygraph_mini\" style=\"right:113px;bottom:34px;\"><img src=\"trophy_mini_silver.png\"></div>\n";
+	print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:133px;bottom:20px;\">$game{final}{silver} Silver</div>\n";
+	print $out "\t\t<div class=\"gametrophygraph_mini\" style=\"right:149px;bottom:18px;\"><img src=\"trophy_mini_bronze.png\"></div>\n";
+	print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:169px;bottom:4px;\">$game{final}{bronze} Bronze</div>\n";
+	print $out "\t\t<div class=\"gametrophygraph_total\">$ttot</div>\n";
+	print $out "\t</div>\n";
+
+	print $out <<EOT;
+</div>
+<div class="captionrow">
+	<span class="captiontext">$caption</span>
+</div>
+EOT
+
+	foreach (sort {$a <=> $b} (keys(%trophies))) {
+		my %trophy = %{$trophies{$_}};
+		print $out "<div class=\"trophyrow\">\n";
+		# image
+		if ($trophy{img}) {
+			print $out "\t<div class=\"trophyimage\"><img src=\"".$trophy{img}."\" alt=\"".$trophy{text}."\" title=\"".$trophy{text}."\"></div>\n";
+		} else {
+			print $out "\t<div class=\"trophyimage\"><img src=\"".$trophy_small{locked}."\" alt=\"".$trophy{text}."\" title=\"".$trophy{text}."\"></div>\n";
+		}
+		# name and text
+		print $out "\t<div class=\"trophytitle\"><span class=\"trophyname\">".$trophy{name}."</span><br><span class=\"trophytext\">".$trophy{text}."</span></div>\n";
+		# date
+		print $out "\t<div class=\"trophydate\">".$trophy{date}."</div>\n";
+		# mini trophygrid
+		print $out "\t<div class=\"trophygrid\">\n";
+		print $out print_trophy_mini($trophy{metal},$trophy{date});
+		print $out "\t</div>\n";
+		print $out "</div>\n";
+	}
+
+	print $out <<EOT;
+</div>
+</body>
+</html>
+EOT
+}
+
+sub print_trophy_mini {
+	my ($metal,$date) = @_;
+	
+	# earned if date, default faded one if unearned
+	my $trophy_icon = $date ? $trophy_mini{$metal} : $trophy_mini{default};
+	
+	# unknown hidden trophies have no position at all
+	my %metal_position = (
+		unknown => -1,
+		bronze => 0,
+		silver => 1,
+		gold => 2,
+		platinum => 3,
+	);
+	
+	my $trophy_mini_html;
+	for (my $t = 0; $t <= 3; $t++) {
+		if ($t == $metal_position{$metal}) {
+			$trophy_mini_html .= "\t\t<div class=\"trophyicon\"><img src=\"".$trophy_icon."\" alt=\"".$metal."\" title=\"".$metal."\"></div>\n";
+		} else {
+			$trophy_mini_html .= "\t\t<div class=\"trophyicon\">&nbsp;</div>\n";
+		}
+	}
+	return $trophy_mini_html;
 }
 
 #sub scrape_psn_2012 {
