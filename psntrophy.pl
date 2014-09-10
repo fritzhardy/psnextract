@@ -8,6 +8,7 @@ use strict;
 use Getopt::Long;
 use HTML::TokeParser::Simple;
 use File::Copy;
+use File::Basename;
 
 my $script_name = $0; $script_name =~ s/.*\///;
 my $usage = sprintf <<EOT;
@@ -158,16 +159,24 @@ sub build_web {
 		mkdir($web) or die "ERROR: Cannot mkdir $web: $!\n";
 	}
 	
-	# lookup hash to store save-as-html file to its accompanying 
-	# files directory in order to find source directory when copying images
-	my %sources;
-	my $us_files = $us;	# resistance_2_us.html
-	$us_files =~ s/\.html/_files/;	# resistance_2_us_files, assuming firefox behavior
-	$sources{$us} = $us_files;
-	
-	my $uk_files = $uk;	# resistance_2_uk.html
-	$uk_files =~ s/\.html/_files/;	# resistance_2_uk_files, assuming firefox behavior
-	$sources{$uk} = $uk_files;
+	# when save-as-webpage with firefox, image paths in the html are relative 
+	# to the saved html file, so in order to ensure we find the images, we will 
+	# need to store and reference preceding paths from our us/uk arguments 
+	my %sources;	
+	if ($us) {
+		my ($usbase, $uspath, $ussuffix) = fileparse($us);	# /path/to/resistance_2_us.html or just resistance_2_us.html
+		print "$us => usbase: $usbase, uspath: $uspath, ussuffix: $ussuffix\n";
+		my $usfiles = $usbase;
+		$usfiles =~ s#\.html#_files/#;		# resistance_2_us_files, assuming firefox behavior
+		$sources{$usfiles} = $uspath;
+	}
+	if ($uk) {
+		my ($ukbase, $ukpath, $uksuffix) = fileparse($uk);	# /path/to/resistance_2_uk.html or just resistance_2_uk.html
+		print "$uk => ukbase: $ukbase, ukpath: $ukpath, uksuffix: $uksuffix\n";
+		my $ukfiles = $ukbase;
+		$ukfiles =~ s#\.html#_files/#;		# resistance_2_uk_files, assuming firefox behavior
+		$sources{$ukfiles} = $ukpath;
+	}
 	
 	foreach (sort(keys(%sources))) {
 		print "$_ $sources{$_}\n";	
@@ -183,10 +192,16 @@ sub build_web {
 	}
 	
 	# copy game images
+	# definitely a hack to figure out file paths
 	foreach my $attr ('img','avatar') {
-		if ($game{us}{$attr}) {
-			print "cp -a $sources{$us}/$game{us}{$attr} $web: " if $verbose;
-			my $ret = system("cp","-a","$sources{$us}/$game{us}{$attr}", $web); $ret >>= 8;
+		if ($game{final}{$attr}) {
+			# resistance_2_files/ASDF.PNG
+			my ($base, $path, $suffix) = fileparse($game{final}{$attr});
+			print "$game{final}{$attr} => base: $base, path: $path, suffix: $suffix\n";
+			# /path/to/ + resistance_2_files/ASDF.PNG
+			my $imgpath = $sources{$path}.$game{final}{$attr};
+			print "cp -a $imgpath $web: " if $verbose;
+			my $ret = system("cp","-a",$imgpath, $web); $ret >>= 8;
 			print "$ret\n" if $verbose;
 		}
 	}
@@ -195,8 +210,13 @@ sub build_web {
 	foreach my $n (sort {$a <=> $b} (keys(%trophies))) {
 		my %trophy = %{$trophies{$n}};
 		next if !$trophy{img};
-		print "cp -a $sources{$trophy{src}}/$trophy{img} $web: " if $verbose;
-		my $ret = system("cp","-a","$sources{$trophy{src}}/$trophy{img}",$web); $ret >>= 8;
+		# resistance_2_files/ASDF.PNG
+		my ($base, $path, $suffix) = fileparse($trophy{img});
+		print "$trophy{img} => base: $base, path: $path, suffix: $suffix\n";
+		# /path/to/ + resistance_2_files/ASDF.PNG
+		my $imgpath = $sources{$path}.$trophy{img};
+		print "cp -a $imgpath $web: " if $verbose;
+		my $ret = system("cp","-a",$imgpath,$web); $ret >>= 8;
 		print "$ret\n" if $verbose;
 	}
 }
@@ -359,7 +379,150 @@ sub parse_overrides {
 #	</td>
 #</tr>
 sub scrape_uk_psn_20140607 {
-
+	my ($htmlfile) = @_;
+	
+	# We clean up and concatenate what we what we want here 
+	# to protect against careless line breaks in the html
+	my $htmlstr;
+	my $gameon = 0;
+	open (my $fh,$htmlfile) or die "Cannot open $htmlfile: $!\n";
+	while (<$fh>) {
+		if (m/<div class="CM162-compare-game-trophies /) { $gameon = 1; next; }
+		if (m/<footer class="r2d2 full-width-footer">/) { $gameon = 0; last; }
+		if ($gameon) {
+			chomp($_);
+			s/^\s+//;
+			s/\s+$//;
+			$htmlstr .= $_;
+		}
+	}
+	close ($fh);
+	
+	#print $htmlstr;
+	
+	# Trophy row html blocks follow.  It is probably better not to 
+	# construct a new object over and over and instead just parse 
+	# the whole doc, but since we have isolated the html out of the 
+	# trophy table row-by-row, it is easier to digest, and we 
+	# number trophies by row number besides, so oh well.	
+	my $p = HTML::TokeParser::Simple->new(\$htmlstr);
+	my $trophyn = 0;
+	my $tokn = 0;
+	while ( my $tok = $p->get_token ) {
+		# new trophy increment
+		#<td class="trophy-unlocked-false">
+		#<td class="trophy-unlocked-true">
+		if ($tok->is_start_tag('td') && $tok->get_attr('class') =~ m/trophy-unlocked-(\S+)/) {
+			$trophyn++;
+			$tokn = 0; 	
+			print "\n" if $verbose > 2;
+		}
+		
+		# debug
+		if ($verbose > 2) {
+			my $asis = $tok->as_is();
+			my $tag = $tok->get_tag();
+			my $hash = $tok->get_attr();
+			my $class = $tok->get_attr('class');
+			print "$trophyn $tokn $asis | tag:$tag class:$class\n";
+		}
+		
+		# First batch of html before trophies contains gamedata bits such as 
+		# percentage, trophy counts, etc, which we stuff into the global %game hash
+		if ($trophyn == 0) {
+			# game title and image
+			#<div class="game-image">
+			#<img src="resistance_2_uk_files/8F0B2E25C3524F1EF9EE87AD1999F7FD8A5EC4F8.PNG" alt="Resistance 2TM">
+			if ($tok->is_start_tag('div') && $tok->get_attr('class') eq 'game-image') {
+				my $imgtag = $p->peek(2);
+				$imgtag =~ m/src="(.*)" alt="(.*)"/;
+				my $img = clean_str($1);
+				my $title = clean_str($2);
+				#$img =~ s#.*/##;	# eliminate folder path
+				print "SCRAPE_UK title=>$title img=>$img\n" if $verbose > 2;
+				$game{uk}{title} = $title;
+				$game{uk}{img} = $img;
+			}
+			
+			# game user and avatar
+			#<img class="avatar-image" src="resistance_2_uk_files/A0031_002.png" alt="fritxhardy">
+			if ($tok->is_start_tag('img') && $tok->get_attr('class') eq 'avatar-image' && $tok->get_attr('src')) {
+				my $user = $tok->get_attr('alt');
+				my $avatar = $tok->get_attr('src');
+				#$avatar =~ s#.*/##;	# eliminate folder path
+				print "SCRAPE_UK user=>$user\n" if $verbose > 2;
+				print "SCRAPE_UK avatar=>$avatar\n" if $verbose > 2;
+				$game{uk}{user} = $user;
+				$game{uk}{avatar} = $avatar;
+			}
+			
+			# trophy counts
+			#<li class="bronze"> 
+			#18
+			#<li class="silver">
+			#2
+			if ($tok->is_start_tag('li')) {
+				my $metal = $tok->get_attr('class');
+				if (!exists($trophy_mini{$metal})) { next; }
+				my $count = $p->peek(1);
+				print "SCRAPE_UK $metal=>$count\n" if $verbose > 2;
+				$game{uk}{$metal} = $count;
+			}
+			
+			# progress bar
+			#<div class="slider" style="width: 42%;">
+			if ($tok->is_start_tag('div') && $tok->get_attr('class') eq 'slider') {
+				my $progress = $tok->get_attr('style');
+				$progress =~ s/.* //;
+				$progress =~ s/\%.*//;
+				print "SCRAPE_UK progress=>$progress\n" if $verbose > 2;
+				$game{uk}{progress} = $progress;
+			}
+		}
+		else {
+			# unlocked true/false
+			#<td class="trophy-unlocked-false">
+			#<td class="trophy-unlocked-true">
+			if ($tok->is_start_tag('td') && $tok->get_attr('class') =~ m/trophy-unlocked-(\S+)/) {
+				print "SCRAPE_UK unlocked=>$1\n" if $verbose > 2;
+				$trophies{uk}{$trophyn}{unlocked} = $1;
+			}
+			
+			# image or locked
+			#<img src="resistance_2_uk_files/79C5ACB1375731F2778CFBEBBFE1B5BF55D23BAA.PNG" alt="">
+			#<img src="resistance_2_uk_files/locked_trophy.png" alt="">
+			if ($tok->is_start_tag('img') && $tok->get_attr('src') !~ m/locked/) {
+				my $img = $tok->get_attr('src');
+				#$img =~ s#.*/##;	# eliminate folder path
+				print "SCRAPE_UK $trophyn img=>$img\n" if $verbose > 2;
+				$trophies{uk}{$trophyn}{img} = $img;
+			}
+			
+			# metal/unknown and name
+			#<h1 class="trophy_name unknown">
+			#<h1 class="trophy_name bronze">
+			#Rampage!
+			if ($tok->is_start_tag('h1') && $tok->get_attr('class') =~ m/trophy_name\s+(\S+)/) {
+				my $metal = $1;
+				my $name = $p->peek(1);
+				print "SCRAPE_UK $trophyn metal=>$metal\n" if $verbose > 2;
+				print "SCRAPE_UK $trophyn name=>$name\n" if $verbose > 2;
+				$trophies{uk}{$trophyn}{metal} = $metal;
+				$trophies{uk}{$trophyn}{name} = $name;
+			}
+			
+			# trophy text
+			#<h2>
+			#Kill 40 hybrids in the Single Player Campaign.
+			if ($tok->is_start_tag('h2')) {
+				my $text = $p->peek(1);
+				print "SCRAPE_UK $trophyn text=>$text\n" if $verbose > 2;
+				$trophies{uk}{$trophyn}{text} = clean_str($text);
+			}
+		}
+		$tokn++;
+	}
+	print "\n" if $verbose > 2;
 }
 
 # 2014-06-07 us.playstation.com
@@ -407,6 +570,8 @@ sub scrape_us_psn_20140607 {
 		if (m/<!-- START - FOOTER INCLUDE -->/) { $gameon = 0; last; }
 		if ($gameon) {
 			chomp($_);
+			s/^\s+//;
+			s/\s+$//;
 			$htmlstr .= $_;
 		}
 	}
@@ -524,7 +689,7 @@ sub scrape_us_psn_20140607 {
 				}
 				
 				# trophy text
-				#<h2> | tag:h2 class:
+				#<h2>
 				#Kill 40 hybrids in the Single Player Campaign.
 				if ($tok->is_start_tag('h2')) {
 					#print $tok->as_is()."\n";
@@ -765,6 +930,10 @@ EOT
 
 	#print $out "$game{final}{title} $game{final}{img} $game{final}{user} $game{final}{avatar} bronze:$game{final}{bronze} silver:$game{final}{silver} gold:$game{final}{gold} platinum:$game{final}{platinum} progress:$game{final}{progress}\n";
 
+	# strip image paths now that we are writing html
+	$game{final}{img} =~ s#.*/##;
+	$game{final}{avatar} =~ s#.*/##;
+
 	print $out "\t<div class=\"gamegraphic\">\n";	
 	print $out "\t\t<img src=\"$game{final}{img}\" title=\"$game{final}{title}\" alt=\"$game{final}{title}\" width=\"180\" height=\"99\">\n";
 	print $out "\t</div>\n";
@@ -811,6 +980,10 @@ EOT
 
 	foreach (sort {$a <=> $b} (keys(%trophies))) {
 		my %trophy = %{$trophies{$_}};
+		
+		# strip image paths now that we are writing html
+		$trophy{img} =~ s#.*/##;
+		
 		print $out "<div class=\"trophyrow\">\n";
 		# image
 		if ($trophy{img}) {
@@ -824,7 +997,7 @@ EOT
 		print $out "\t<div class=\"trophydate\">".$trophy{date}."</div>\n";
 		# mini trophygrid
 		print $out "\t<div class=\"trophygrid\">\n";
-		print $out print_trophy_mini($trophy{metal},$trophy{date});
+		print $out print_trophy_mini($trophy{metal},$trophy{unlocked});
 		print $out "\t</div>\n";
 		print $out "</div>\n";
 	}
@@ -837,10 +1010,12 @@ EOT
 }
 
 sub print_trophy_mini {
-	my ($metal,$date) = @_;
+	my ($metal,$unlocked) = @_;
 	
-	# earned if date, default faded one if unearned
-	my $trophy_icon = $date ? $trophy_mini{$metal} : $trophy_mini{default};
+	#print "$metal $unlocked\n";
+	
+	# earned if unlocked true, default faded one if unearned
+	my $trophy_icon = $unlocked eq 'true' ? $trophy_mini{$metal} : $trophy_mini{default};
 	
 	# unknown hidden trophies have no position at all
 	my %metal_position = (
