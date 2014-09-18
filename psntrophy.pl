@@ -270,6 +270,7 @@ sub merge_gamedata {
 		}
 		print "\n" if $verbose > 1;
 	}
+	print "\n--\n\n" if $verbose > 1;
 }
 
 sub merge_trophies {
@@ -315,6 +316,7 @@ sub merge_trophies {
 		}
 		print "\n" if $verbose > 1;
 	}
+	print "\n--\n\n" if $verbose > 1;
 }
 
 sub parse_overrides {
@@ -334,15 +336,16 @@ sub parse_overrides {
 		foreach (@atoms) {
 			my ($attr,$val) = split(/\=>/,$_);
 			if ($object eq 'game') {
-				print "OVERRIDE $attr=>$val\n" if $verbose > 2;
+				print "OVER $attr=>$val\n" if $verbose > 2;
 				$game{override}{$attr} = $val;
 			} else {
-				print "OVERRIDE $object $attr=>$val\n" if $verbose > 2;
+				print "OVER $object $attr=>$val\n" if $verbose > 2;
 				$trophies{override}{$object}{$attr} = $val;	# store by number
 			}
 		}
 	}
 	close (FH);
+	print "\n--\n\n" if $verbose > 2;
 }
 
 # 2014-06-07 UK
@@ -519,7 +522,7 @@ sub scrape_uk_psn_20140607 {
 		}
 		$tokn++;
 	}
-	print "\n" if $verbose > 2;
+	print "\n--\n\n" if $verbose > 2;
 }
 
 # 2014-06-07 us.playstation.com
@@ -722,30 +725,21 @@ sub scrape_us_psn_20140607 {
 		}
 		$tokn++;
 	}
-	print "\n" if $verbose > 2;
+	print "\n--\n\n" if $verbose > 2;
 }
 
 sub write_html {
 	my ($web,$game,$trophies) = @_;
 	my %trophies = %$trophies;
-	my ($title,$caption);
 	
-	my $ttot = $game{us}{platinum}+$game{us}{gold}+$game{us}{silver}+$game{us}{bronze};
+	my $ttot = $game{final}{platinum}+$game{final}{gold}+$game{final}{silver}+$game{final}{bronze};
+	my $caption = $game{final}{caption} ? $game{final}{caption} : 'nbsp;';
 	
 	open (my $out,">$web/index.html") or die "ERROR: Cannot write $web/index.html: $!\n";
-#	my $caption = '&nbsp';
-#	if (-f $captions) {
-#		$/ = undef;
-#		open (FH,$captions) or warn "Cannot open $captions: $!\n";
-#		$caption = <FH>;
-#		close (FH);
-#		$/ = "\n";
-#		$caption =~ s/\n/<br>\n/g;
-#	}
 	print $out <<EOT;
 <html>
 <head>
-<title>$title</title>
+<title>$game{final}{title}</title>
 <style type="text/css">
 .table {
 	width: 780px;
@@ -799,7 +793,7 @@ sub write_html {
 	background: #ffffff;
 	border: 1px solid #808080;
 	position: absolute;
-	right: 30px;
+	right: 33px;
 	bottom: 8px;
 }
 .gameinfo_progressslider {
@@ -924,7 +918,7 @@ EOT
 	$game{final}{avatar} =~ s#.*/##;
 
 	print $out "\t<div class=\"gamegraphic\">\n";	
-	print $out "\t\t<img src=\"$game{final}{img}\" title=\"$game{final}{title}\" alt=\"$game{final}{title}\" width=\"180\" height=\"99\">\n";
+	print $out "\t\t<img src=\"$game{final}{img}\" title=\"$game{final}{title}\" alt=\"$game{final}{title}\" width=\"182\" height=\"100\">\n";
 	print $out "\t</div>\n";
 	
 	print $out "\t<div class=\"gameinfo\">\n";
@@ -1000,8 +994,7 @@ EOT
 
 sub print_trophy_mini {
 	my ($metal,$unlocked) = @_;
-	
-	print "$metal $unlocked\n";
+	#print "$metal $unlocked\n";
 	
 	# earned if unlocked true, default faded one if unearned
 	my $trophy_icon = $unlocked eq 'true' ? $trophy_mini{$metal} : $trophy_mini{default};
