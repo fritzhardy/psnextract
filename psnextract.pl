@@ -408,13 +408,17 @@ sub scrape_uk_psn_20140607 {
 	my $trophyn = 0;
 	my $tokn = 0;
 	while ( my $tok = $p->get_token ) {
-		# new trophy increment
+		# new trophy increment and unlocked true/false
 		#<td class="trophy-unlocked-false">
 		#<td class="trophy-unlocked-true">
 		if ($tok->is_start_tag('td') && $tok->get_attr('class') =~ m/trophy-unlocked-(\S+)/) {
 			$trophyn++;
-			$tokn = 0; 	
+			$tokn = 0;
 			print "\n" if $verbose > 2;
+			# get trophy lock status as well
+			print "SCRAPE_UK $trophyn unlocked=>$1\n" if $verbose > 2;
+			$trophies{uk}{$trophyn}{unlocked} = $1;
+			$trophies{uk}{$trophyn}{source} = 'uk';
 		}
 		
 		# debug
@@ -480,14 +484,6 @@ sub scrape_uk_psn_20140607 {
 			}
 		}
 		else {
-			# unlocked true/false
-			#<td class="trophy-unlocked-false">
-			#<td class="trophy-unlocked-true">
-			if ($tok->is_start_tag('td') && $tok->get_attr('class') =~ m/trophy-unlocked-(\S+)/) {
-				print "SCRAPE_UK $trophyn unlocked=>$1\n" if $verbose > 2;
-				$trophies{uk}{$trophyn}{unlocked} = $1;
-			}
-			
 			# image or locked
 			#<img src="resistance_2_uk_files/79C5ACB1375731F2778CFBEBBFE1B5BF55D23BAA.PNG" alt="">
 			#<img src="resistance_2_uk_files/locked_trophy.png" alt="">
@@ -586,8 +582,12 @@ sub scrape_us_psn_20140607 {
 		#<tr class="trophy-tr">
 		if ($tok->is_start_tag('tr') && $tok->get_attr('class') eq 'trophy-tr') {
 			$trophyn++;
-			$tokn = 0; 	
+			$tokn = 0;
 			print "\n" if $verbose > 2;
+			# assume trophy unlocked since we only find out cases of locked later
+			print "SCRAPE_US $trophyn unlocked=>true\n" if $verbose > 2;
+			$trophies{us}{$trophyn}{unlocked} = 'true';
+			$trophies{us}{$trophyn}{source} = 'us';
 		}
 		
 		# debug
@@ -655,9 +655,16 @@ sub scrape_us_psn_20140607 {
 			# locked or unlocked
 			#<td class="trophy-td trophy-unlocked-false">
 			#<td class="trophy-td trophy-unlocked-true">
-			if ($tok->is_start_tag('td') && $tok->get_attr('class') =~ m/trophy-unlocked-(\S+)/) {
-				print "SCRAPE_US $trophyn unlocked=>$1\n" if $verbose > 2;
-				$trophies{us}{$trophyn}{unlocked} = $1;
+			#if ($tok->is_start_tag('td') && $tok->get_attr('class') =~ m/trophy-unlocked-(\S+)/) {
+			#	print "SCRAPE_US $trophyn unlocked=>$1\n" if $verbose > 2;
+			#	$trophies{us}{$trophyn}{unlocked} = $1;
+			#}
+			
+			# span locked
+			#<span class="locked">
+			if ($tok->is_start_tag('span') && $tok->get_attr('class') eq 'locked') {
+				print "SCRAPE_US $trophyn unlocked=>false\n" if $verbose > 2;
+				$trophies{us}{$trophyn}{unlocked} = 'false';
 			}
 				
 			# metal or unknown
@@ -733,7 +740,7 @@ sub write_html {
 	my %trophies = %$trophies;
 	
 	my $ttot = $game{final}{platinum}+$game{final}{gold}+$game{final}{silver}+$game{final}{bronze};
-	my $caption = $game{final}{caption} ? $game{final}{caption} : 'nbsp;';
+	my $caption = $game{final}{caption} ? $game{final}{caption} : '';
 	
 	open (my $out,">$web/index.html") or die "ERROR: Cannot write $web/index.html: $!\n";
 	print $out <<EOT;
@@ -756,8 +763,17 @@ sub write_html {
 .gamegraphic {
 	float: left;
 	#border-right: 2px solid #ffffff;
+	position: relative;
 	width: 220px;
 	height: 100%;
+}
+.gamegraphic_img {
+	#box-shadow: 10px 10px 5px #888888;
+	width: 167px;
+	height: 92px;
+	position: absolute;
+	left: 6px;
+	bottom: 4px;
 }
 .gameinfo {
 	float: left;
@@ -798,7 +814,7 @@ sub write_html {
 }
 .gameinfo_progressslider {
 	height: 8px;
-	margin: 1px 1px 1px 1px;
+	margin: 1px 0px 1px 0px;
 	background-color: #0068bf;
 }
 .gameinfo_progresstext {
@@ -851,7 +867,7 @@ sub write_html {
 	border-bottom: 2px solid #dddddd;
 }
 .captiontext {
-	margin: 5px 5px 5px 5px;
+	#margin: 15px 15px 15px 15px;
 	text-align: left;
 	font-size: 12px;
 	font-weight: normal;
@@ -917,8 +933,10 @@ EOT
 	$game{final}{img} =~ s#.*/##;
 	$game{final}{avatar} =~ s#.*/##;
 
-	print $out "\t<div class=\"gamegraphic\">\n";	
-	print $out "\t\t<img src=\"$game{final}{img}\" title=\"$game{final}{title}\" alt=\"$game{final}{title}\" width=\"182\" height=\"100\">\n";
+	print $out "\t<div class=\"gamegraphic\">\n";
+	print $out "\t\t<div class=\"gamegraphic_img\">\n";
+	print $out "\t\t\t<img src=\"$game{final}{img}\" title=\"$game{final}{title}\" alt=\"$game{final}{title}\" width=\"167\" height=\"92\">\n";
+	print $out "\t\t</div>\n";
 	print $out "\t</div>\n";
 	
 	print $out "\t<div class=\"gameinfo\">\n";
@@ -957,7 +975,7 @@ EOT
 	print $out <<EOT;
 </div>
 <div class="captionrow">
-	<span class="captiontext">$caption</span>
+	<span class="captiontext"><p>$caption</p></span>
 </div>
 EOT
 
