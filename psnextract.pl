@@ -1,8 +1,29 @@
 #!/usr/bin/perl
-# psntrophy.pl
-# Aug 20, 2011 4:55:10 PM
+# psnextract.pl
+# ctime 20110820165510
 # jeff hardy (jeff at fritzhardy dot com)
 # scrape downloaded psn trophy page into hash and build custom html output
+#
+# #############
+# Copyright (C) 2014, Jeff Hardy <hardyjm@potsdam.edu>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307,
+# USA.
+# #############
+#
+# see 'perldoc ./psnextract.pl'
 
 use strict;
 use Getopt::Long;
@@ -1139,3 +1160,180 @@ sub print_trophy_mini {
 #		}
 #	}
 #}
+
+=head1 NAME
+
+psnextract.pl
+
+=head1 SYNOPSIS
+
+=over 4
+
+=item Firefox save PSN US web page:
+
+save-as-webpage gamedata-us.html
+
+=item Parse data and output to webdir with included graphics:
+
+ psnextract.pl --us gamedata-us.html --include includedir --web outputdir
+
+=item Combination with UK data:
+
+ psnextract.pl --us gamedata-us.html --uk gamedata-uk.html \
+ --include includedir --web outputdir
+
+=item Designate file for override variables:
+
+ psnextract.pl --us gamedata-us.html --uk gamedata-uk.html \
+ --include includdir --override override.txt --web outputdir
+
+=back
+
+=head1 DESCRIPTION
+
+Psnextract is a tool intended to gather trophy data from PlayStation Network, 
+parsing downloaded html for use building external web pages.
+
+=head1 INSTALLATION
+
+Script requirements are as follows:
+
+ HTML::TokeParser::Simple;
+
+Installation consists of merely untarring the script, and likely making use of 
+the included graphics with the include argument.  At this time, html output 
+formatting and styles are hardcoded, so any customization must be done via 
+programmatic changes within the script.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-d, --dry-run>
+
+Do not actually do any operations.  Combines well with --verbose to debug 
+problems.
+
+=item B<-h, --help>
+
+Print brief usage message.
+
+=item B<-i, --include=/path/to/include/graphics>
+
+Path to directory of graphics and other items to include when building web. The 
+include directory provided in the package includes all items necessary for 
+building web pages as is done in the write_html function.  Adjustments to that 
+function may well require additions to include.
+
+=item B<-o, --override=/path/to/override>
+
+File of corrections and additions with which to override game and trophy values 
+parsed from html.  Format is item|attribute=value.  See OVERRIDES.
+
+=item B<--uk=/path/to/uk_psn.html>
+
+File of UK PSN html save-as-webpage data to parse.  Assumes Firefox format, 
+with file uk_psn.html and accompanying directory uk_psn_files.
+
+=item B<--us=/path/to/us_psn.html>
+
+File of US PSN html save-as-webpage data to parse.  Assumes Firefox format, 
+with file us_psn.html and accompanying directory us_psn_files.
+
+=item B<-v, --verbose>
+
+Control vebosity of output.  Increase by passing multiple times. 
+
+=item B<-w, --web=/path/to/webdir>
+
+Web destination to which include graphics and items are copied, and inside 
+which index.html is written from parsed data.
+
+=back
+
+=head1 MULTIPLE HTML SOURCES
+
+The purpose for supporting both US and UK data sources and merging them with 
+overrides is the following observation:
+
+ US: Datestamps, bigger trophy graphics, often missing or delayed DLC
+ UK: No datestamps, always up-to-date DLC 
+
+The main issue is missing DLC.  As such, the sources are overlayed on top of 
+one another: UK -> US -> overrides.  UK data to provide data for all 
+trophies minus datestamps, US to fill in missing datestamps and provide nicer 
+graphics, and lastly overrides to fill in any missing info.
+
+In most cases, US data is all that is needed to provide all info.
+
+=head1 OVERRIDES
+
+The overrides facility is used to provide missing info, corrections, addendums, 
+and any caption desired for web output.  Overrides are one per line, in format 
+item|attribute=value.  Example specifying all possible overrides:
+
+ game|title=>Game of the Ages
+ game|caption=>This is a terrific game
+ game|img=>awesome.jpg
+ game|user=>foobar
+ game|avatar=>foobar.jpg
+ game|progress=>50
+ game|bronze=>12
+ game|silver=>34
+ game|gold=>56
+ game|platinum=>78
+ 1|date=>Fri Aug 24 22:49:00 EDT 2012
+ 2|date=>Fri Aug 24 20:45:00 EDT 2012
+ 3|date=>Fri Nov 12 22:22:00 EST 2010
+ 4|date=>Fri Aug 31 21:44:00 EDT 2012
+ 5|date=>Sun Sep 16 15:15:00 EDT 2012
+
+Every game line is overriding info that will appear in the masthead, while  
+numbered lines provide info for the given trophy.  It is most common to use the 
+overrides file only to specify caption, and in the event of missing DLC, trophy 
+date.
+
+=head1 EXAMPLES
+
+=over 4
+
+=item Parse US PSN data:
+
+ psnextract.pl --us=gamedata_us.html
+
+=item See lots of verbose output:
+
+ psnextract.pl -v -v -v -v --us=gamedata_us.html
+
+=item Also parse UK PSN data:
+
+ psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html
+
+=item Add in overrides:
+
+ psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
+ --override=override.txt
+
+=item Now build a web page with it all:
+
+ psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
+ --override=override.txt --web=webdir
+
+=item Include graphics for complete html output:
+
+ psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
+ --override=override.txt --include=includedir --web=webdir
+
+=back
+
+=head1 CHANGES
+
+21041007
+
+-Complete perldocs, pod2text README
+
+93c715124cb18143d9b02ffc5363b75f366a7c89 (20140927)
+
+-Initial release
+
+=cut
