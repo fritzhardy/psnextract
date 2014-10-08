@@ -6,7 +6,8 @@ SYNOPSIS
         save-as-webpage gamedata-us.html
 
     Parse data and output to webdir with included graphics:
-         psnextract.pl --us gamedata-us.html --include includedir --web outputdir
+         psnextract.pl --us gamedata-us.html --include includedir \
+         --web outputdir
 
     Combination with UK data:
          psnextract.pl --us gamedata-us.html --uk gamedata-uk.html \

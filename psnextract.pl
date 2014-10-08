@@ -1175,7 +1175,8 @@ save-as-webpage gamedata-us.html
 
 =item Parse data and output to webdir with included graphics:
 
- psnextract.pl --us gamedata-us.html --include includedir --web outputdir
+ psnextract.pl --us gamedata-us.html --include includedir \
+ --web outputdir
 
 =item Combination with UK data:
 
