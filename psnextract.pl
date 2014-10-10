@@ -1163,37 +1163,35 @@ sub print_trophy_mini {
 
 =head1 NAME
 
-psnextract.pl
+psnextract
 
 =head1 SYNOPSIS
 
-=over 4
+Firefox save trophy game page from PSN US:
 
-=item Firefox save PSN US web page:
+ save-as-webpage gamedata-us.html
 
-save-as-webpage gamedata-us.html
-
-=item Parse data and output to webdir with included graphics:
+Parse data and output to webdir with included graphics:
 
  psnextract.pl --us gamedata-us.html --include includedir \
  --web outputdir
 
-=item Combination with UK data:
+Combination with UK data:
 
  psnextract.pl --us gamedata-us.html --uk gamedata-uk.html \
  --include includedir --web outputdir
 
-=item Designate file for override variables:
+Designate file for override variables:
 
  psnextract.pl --us gamedata-us.html --uk gamedata-uk.html \
  --include includdir --override override.txt --web outputdir
 
-=back
-
 =head1 DESCRIPTION
 
 Psnextract is a tool intended to gather trophy data from PlayStation Network, 
-parsing downloaded html for use building external web pages.
+parsing downloaded html for use building external web pages.  It is able to 
+parse and merge output from both the US and UK sites, and data can be 
+overridden at will.
 
 =head1 INSTALLATION
 
@@ -1296,36 +1294,32 @@ date.
 
 =head1 EXAMPLES
 
-=over 4
-
-=item Parse US PSN data:
+Parse US PSN data:
 
  psnextract.pl --us=gamedata_us.html
 
-=item See lots of verbose output:
+See lots of verbose output:
 
  psnextract.pl -v -v -v -v --us=gamedata_us.html
 
-=item Also parse UK PSN data:
+Also parse UK PSN data:
 
  psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html
 
-=item Add in overrides:
+Add in overrides:
 
  psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
  --override=override.txt
 
-=item Now build a web page with it all:
+Now build a web page with it all:
 
  psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
  --override=override.txt --web=webdir
 
-=item Include graphics for complete html output:
+Include graphics for complete html output:
 
  psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
  --override=override.txt --include=includedir --web=webdir
-
-=back
 
 =head1 CHANGES
 

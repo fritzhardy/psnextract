@@ -1,25 +1,31 @@
 NAME
-    psnextract.pl
+    psnextract
 
 SYNOPSIS
-    Firefox save PSN US web page:
-        save-as-webpage gamedata-us.html
+    Firefox save trophy game page from PSN US:
+
+     save-as-webpage gamedata-us.html
 
     Parse data and output to webdir with included graphics:
-         psnextract.pl --us gamedata-us.html --include includedir \
-         --web outputdir
+
+     psnextract.pl --us gamedata-us.html --include includedir \
+     --web outputdir
 
     Combination with UK data:
-         psnextract.pl --us gamedata-us.html --uk gamedata-uk.html \
-         --include includedir --web outputdir
+
+     psnextract.pl --us gamedata-us.html --uk gamedata-uk.html \
+     --include includedir --web outputdir
 
     Designate file for override variables:
-         psnextract.pl --us gamedata-us.html --uk gamedata-uk.html \
-         --include includdir --override override.txt --web outputdir
+
+     psnextract.pl --us gamedata-us.html --uk gamedata-uk.html \
+     --include includdir --override override.txt --web outputdir
 
 DESCRIPTION
     Psnextract is a tool intended to gather trophy data from PlayStation
-    Network, parsing downloaded html for use building external web pages.
+    Network, parsing downloaded html for use building external web pages. It
+    is able to parse and merge output from both the US and UK sites, and
+    data can be overridden at will.
 
 INSTALLATION
     Script requirements are as follows:
@@ -111,25 +117,31 @@ OVERRIDES
 
 EXAMPLES
     Parse US PSN data:
-         psnextract.pl --us=gamedata_us.html
+
+     psnextract.pl --us=gamedata_us.html
 
     See lots of verbose output:
-         psnextract.pl -v -v -v -v --us=gamedata_us.html
+
+     psnextract.pl -v -v -v -v --us=gamedata_us.html
 
     Also parse UK PSN data:
-         psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html
+
+     psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html
 
     Add in overrides:
-         psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
-         --override=override.txt
+
+     psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
+     --override=override.txt
 
     Now build a web page with it all:
-         psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
-         --override=override.txt --web=webdir
+
+     psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
+     --override=override.txt --web=webdir
 
     Include graphics for complete html output:
-         psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
-         --override=override.txt --include=includedir --web=webdir
+
+     psnextract.pl --us=gamedata_us.html --uk=gamedata_uk.html \
+     --override=override.txt --include=includedir --web=webdir
 
 CHANGES
     21041007
