@@ -186,22 +186,22 @@ sub build_web {
 	my %sources;	
 	if ($us) {
 		my ($usbase, $uspath, $ussuffix) = fileparse($us);	# /path/to/resistance_2_us.html or just resistance_2_us.html
-		#print "$us => usbase: $usbase, uspath: $uspath, ussuffix: $ussuffix\n";
+		#print "$us => usbase: $usbase, uspath: $uspath, ussuffix: $ussuffix\n" if $verbose;
 		my $usfiles = $usbase;
 		$usfiles =~ s#\.html#_files/#;		# resistance_2_us_files, assuming firefox behavior
-		$sources{$usfiles} = $uspath;
+		$sources{'us'} = $uspath.$usfiles;
+		print "us => $us $usbase $usfiles\n" if $verbose;
 	}
 	if ($uk) {
 		my ($ukbase, $ukpath, $uksuffix) = fileparse($uk);	# /path/to/resistance_2_uk.html or just resistance_2_uk.html
-		#print "$uk => ukbase: $ukbase, ukpath: $ukpath, uksuffix: $uksuffix\n";
+		#print "$uk => ukbase: $ukbase, ukpath: $ukpath, uksuffix: $uksuffix\n" if $verbose;
 		my $ukfiles = $ukbase;
 		$ukfiles =~ s#\.html#_files/#;		# resistance_2_uk_files, assuming firefox behavior
-		$sources{$ukfiles} = $ukpath;
+		$sources{'uk'} = $ukpath.$ukfiles;
+		print "uk => $uk $ukbase $ukfiles\n" if $verbose;
 	}
 	
-	#foreach (sort(keys(%sources))) {
-	#	print "$_ $sources{$_}\n";	
-	#}
+	print "\n" if $verbose;
 	
 	# rsync contents of include directory
 	if ($include) {
@@ -216,11 +216,8 @@ sub build_web {
 	# definitely a hack to figure out file paths
 	foreach my $attr ('img','avatar') {
 		if ($game{final}{$attr}) {
-			# resistance_2_files/ASDF.PNG
-			my ($base, $path, $suffix) = fileparse($game{final}{$attr});
-			#print "$game{final}{$attr} => base: $base, path: $path, suffix: $suffix\n";
-			# /path/to/ + resistance_2_files/ASDF.PNG
-			my $imgpath = $sources{$path}.$game{final}{$attr};
+			# ASDF.PNG
+			my $imgpath = $sources{$game{final}{source}}.$game{final}{$attr};
 			print "cp -a $imgpath $web: " if $verbose;
 			my $ret = system("cp","-a",$imgpath, $web); $ret >>= 8;
 			print "$ret\n" if $verbose;
@@ -231,11 +228,8 @@ sub build_web {
 	foreach my $n (sort {$a <=> $b} (keys(%trophies))) {
 		my %trophy = %{$trophies{$n}};
 		next if !$trophy{img};
-		# resistance_2_files/ASDF.PNG
-		my ($base, $path, $suffix) = fileparse($trophy{img});
-		#print "$trophy{img} => base: $base, path: $path, suffix: $suffix\n";
-		# /path/to/ + resistance_2_files/ASDF.PNG
-		my $imgpath = $sources{$path}.$trophy{img};
+		# ASDF.PNG
+		my $imgpath = $sources{$trophy{source}}.$trophy{img};
 		print "cp -a $imgpath $web: " if $verbose;
 		my $ret = system("cp","-a",$imgpath,$web); $ret >>= 8;
 		print "$ret\n" if $verbose;
@@ -463,10 +457,11 @@ sub scrape_uk_psn_20140607 {
 				$imgtag =~ m/src="(.*)" alt="(.*)"/;
 				my $img = clean_str($1);
 				my $title = clean_str($2);
-				#$img =~ s#.*/##;	# eliminate folder path
+				$img =~ s#.*/##;	# eliminate folder path
 				print "SCRAPE_UK title=>$title img=>$img\n" if $verbose > 2;
 				$game{uk}{title} = $title;
 				$game{uk}{img} = $img;
+				$game{uk}{source} = 'uk';
 			}
 			
 			# game user and avatar
@@ -474,7 +469,7 @@ sub scrape_uk_psn_20140607 {
 			if ($tok->is_start_tag('img') && $tok->get_attr('class') eq 'avatar-image' && $tok->get_attr('src')) {
 				my $user = $tok->get_attr('alt');
 				my $avatar = $tok->get_attr('src');
-				#$avatar =~ s#.*/##;	# eliminate folder path
+				$avatar =~ s#.*/##;	# eliminate folder path
 				print "SCRAPE_UK user=>$user\n" if $verbose > 2;
 				print "SCRAPE_UK avatar=>$avatar\n" if $verbose > 2;
 				$game{uk}{user} = $user;
@@ -510,7 +505,7 @@ sub scrape_uk_psn_20140607 {
 			#<img src="resistance_2_uk_files/locked_trophy.png" alt="">
 			if ($tok->is_start_tag('img') && $tok->get_attr('src') !~ m/locked/) {
 				my $img = $tok->get_attr('src');
-				#$img =~ s#.*/##;	# eliminate folder path
+				$img =~ s#.*/##;	# eliminate folder path
 				print "SCRAPE_UK $trophyn img=>$img\n" if $verbose > 2;
 				$trophies{uk}{$trophyn}{img} = $img;
 			}
@@ -632,10 +627,11 @@ sub scrape_us_psn_20140607 {
 				$imgtag =~ m/title="(.*)" alt.* src="(.*)"/;
 				my $title = clean_str($1);
 				my $img = clean_str($2);
-				#$img =~ s#.*/##;	# eliminate folder path
+				$img =~ s#.*/##;	# eliminate folder path
 				print "SCRAPE_US title=>$title img=>$img\n" if $verbose > 2;
 				$game{us}{title} = $title;
 				$game{us}{img} = $img;
+				$game{us}{source} = 'us';
 			}
 			
 			# game user and avatar
@@ -643,7 +639,7 @@ sub scrape_us_psn_20140607 {
 			if ($tok->is_start_tag('img') && $tok->get_attr('class') eq 'avatar-image') {
 				my $user = $tok->get_attr('title');
 				my $avatar = $tok->get_attr('src');
-				#$avatar =~ s#.*/##;	# eliminate folder path
+				$avatar =~ s#.*/##;	# eliminate folder path
 				print "SCRAPE_US user=>$user avatar=>$avatar\n" if $verbose > 2;
 				$game{us}{user} = $user;
 				$game{us}{avatar} = $avatar;
@@ -702,7 +698,7 @@ sub scrape_us_psn_20140607 {
 			#<img src="resistance_2_us_files/locked_trophy.png">
 			if ($tok->is_start_tag('img') && $tok->get_attr('title') ne '') {
 				my $img = $tok->get_attr('src');
-				#$img =~ s#.*/##;	# eliminate folder path
+				$img =~ s#.*/##;	# eliminate folder path
 				print "SCRAPE_US $trophyn img=>$img\n" if $verbose > 2;
 				$trophies{us}{$trophyn}{img} = $img;
 			}
@@ -1066,7 +1062,7 @@ psnextract
 
 Firefox save trophy game page from PSN US:
 
- save-as-webpage gamedata-us.html
+ save-as web-page-complete: gamedata-us.html (gamedata-us_files)
 
 Parse data and output to webdir with included graphics:
 
@@ -1128,13 +1124,13 @@ parsed from html.  Format is item|attribute=value.  See OVERRIDES.
 
 =item B<--uk=/path/to/uk_psn.html>
 
-File of UK PSN html save-as-webpage data to parse.  Assumes Firefox format, 
-with file uk_psn.html and accompanying directory uk_psn_files.
+File of UK PSN html save-as web-page-complete data to parse.  Assumes Firefox 
+format, with file uk_psn.html and accompanying directory uk_psn_files.
 
 =item B<--us=/path/to/us_psn.html>
 
-File of US PSN html save-as-webpage data to parse.  Assumes Firefox format, 
-with file us_psn.html and accompanying directory us_psn_files.
+File of US PSN html save-as web-page-complete data to parse.  Assumes Firefox 
+format, with file us_psn.html and accompanying directory us_psn_files.
 
 =item B<-v, --verbose>
 
@@ -1147,13 +1143,18 @@ which index.html is written from parsed data.
 
 =back
 
-=head1 MULTIPLE HTML SOURCES
+=head1 HTML SOURCES
 
-The purpose for supporting both US and UK data sources and merging them with 
-overrides is the following observation:
+Source HTML data is that seen when browsing to specific game/trophy progress 
+when logged into us.playstation.com and/or uk.playstation.com, and saving the 
+web page with Firefox 'web-page-complete' facility.  This results in an .html 
+file and accompanying _files directory containing graphics and css.
+
+The reason for supporting both US and UK trophy data sources and features for 
+merging them and overlaying overrides is the following observation:
 
  US: Datestamps, bigger trophy graphics, often missing or delayed DLC
- UK: No datestamps, always up-to-date DLC 
+ UK: No datestamps, abbreviated trophy titles, always up-to-date DLC 
 
 The main issue is missing DLC.  As such, the sources are overlayed on top of 
 one another: UK -> US -> overrides.  UK data to provide data for all 
@@ -1162,11 +1163,15 @@ graphics, and lastly overrides to fill in any missing info.
 
 In most cases, US data is all that is needed to provide all info.
 
+NOTE: In the current version of the US site, ensure you scroll down to click 
+'MORE' to show all trophies before saving the page.  Otherwise the div does not 
+contain all information and trophies will be missing.
+
 =head1 OVERRIDES
 
 The overrides facility is used to provide missing info, corrections, addendums, 
 and any caption desired for web output.  Overrides are one per line, in format 
-item|attribute=value.  Example specifying all possible overrides:
+item|attribute=value.  Example specifying most possible overrides:
 
  game|title=>Game of the Ages
  game|caption=>This is a terrific game
@@ -1187,7 +1192,7 @@ item|attribute=value.  Example specifying all possible overrides:
 Every game line is overriding info that will appear in the masthead, while  
 numbered lines provide info for the given trophy.  It is most common to use the 
 overrides file only to specify caption, and in the event of missing DLC, trophy 
-date.
+dates.
 
 =head1 EXAMPLES
 

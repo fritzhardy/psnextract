@@ -4,7 +4,7 @@ NAME
 SYNOPSIS
     Firefox save trophy game page from PSN US:
 
-     save-as-webpage gamedata-us.html
+     save-as web-page-complete: gamedata-us.html (gamedata-us_files)
 
     Parse data and output to webdir with included graphics:
 
@@ -58,13 +58,13 @@ OPTIONS
         OVERRIDES.
 
     --uk=/path/to/uk_psn.html
-        File of UK PSN html save-as-webpage data to parse. Assumes Firefox
-        format, with file uk_psn.html and accompanying directory
+        File of UK PSN html save-as web-page-complete data to parse. Assumes
+        Firefox format, with file uk_psn.html and accompanying directory
         uk_psn_files.
 
     --us=/path/to/us_psn.html
-        File of US PSN html save-as-webpage data to parse. Assumes Firefox
-        format, with file us_psn.html and accompanying directory
+        File of US PSN html save-as web-page-complete data to parse. Assumes
+        Firefox format, with file us_psn.html and accompanying directory
         us_psn_files.
 
     -v, --verbose
@@ -74,12 +74,19 @@ OPTIONS
         Web destination to which include graphics and items are copied, and
         inside which index.html is written from parsed data.
 
-MULTIPLE HTML SOURCES
-    The purpose for supporting both US and UK data sources and merging them
-    with overrides is the following observation:
+HTML SOURCES
+    Source HTML data is that seen when browsing to specific game/trophy
+    progress when logged into us.playstation.com and/or uk.playstation.com,
+    and saving the web page with Firefox 'web-page-complete' facility. This
+    results in an .html file and accompanying _files directory containing
+    graphics and css.
+
+    The reason for supporting both US and UK trophy data sources and
+    features for merging them and overlaying overrides is the following
+    observation:
 
      US: Datestamps, bigger trophy graphics, often missing or delayed DLC
-     UK: No datestamps, always up-to-date DLC
+     UK: No datestamps, abbreviated trophy titles, always up-to-date DLC
 
     The main issue is missing DLC. As such, the sources are overlayed on top
     of one another: UK -> US -> overrides. UK data to provide data for all
@@ -88,10 +95,14 @@ MULTIPLE HTML SOURCES
 
     In most cases, US data is all that is needed to provide all info.
 
+    NOTE: In the current version of the US site, ensure you scroll down to
+    click 'MORE' to show all trophies before saving the page. Otherwise the
+    div does not contain all information and trophies will be missing.
+
 OVERRIDES
     The overrides facility is used to provide missing info, corrections,
     addendums, and any caption desired for web output. Overrides are one per
-    line, in format item|attribute=value. Example specifying all possible
+    line, in format item|attribute=value. Example specifying most possible
     overrides:
 
      game|title=>Game of the Ages
@@ -113,7 +124,7 @@ OVERRIDES
     Every game line is overriding info that will appear in the masthead,
     while numbered lines provide info for the given trophy. It is most
     common to use the overrides file only to specify caption, and in the
-    event of missing DLC, trophy date.
+    event of missing DLC, trophy dates.
 
 EXAMPLES
     Parse US PSN data:
