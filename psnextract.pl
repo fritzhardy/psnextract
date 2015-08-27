@@ -117,7 +117,7 @@ my %game;
 
 main: {
 	# build us/uk hashes from html save-as-webpage data
-	scrape_us_psn_20140607($us) if $us;
+	scrape_us_psn_20150813($us) if $us;
 	scrape_uk_psn_20140607($uk) if $uk;
 	
 	# build addendums hash from local file
@@ -568,7 +568,7 @@ sub scrape_uk_psn_20140607 {
 #	<td class="trophy-td">
 #	</td>
 #</tr>
-sub scrape_us_psn_20140607 {
+sub scrape_us_psn_20150813 {
 	my ($htmlfile) = @_;
 	
 	# We clean up and concatenate what we what we want here 
@@ -624,9 +624,11 @@ sub scrape_us_psn_20140607 {
 			#<img title="Resistance 2TM" alt="Resistance 2TM" src="resistance_2_us_files/8F0B2E25C3524F1EF9EE87AD1999F7FD8A5EC4F8.PNG">
 			if ($tok->is_start_tag('div') && $tok->get_attr('class') eq 'game-image') {
 				my $imgtag = $p->peek(1);
-				$imgtag =~ m/title="(.*)" alt.* src="(.*)"/;
+				#$imgtag =~ m/title="(\S+)".*src="(\S+)"/;	# can no longer rely on order
+				$imgtag =~ m/title="(.*?)"/;
 				my $title = clean_str($1);
-				my $img = clean_str($2);
+				$imgtag =~ m/src="(.*?)"/;
+				my $img = clean_str($1);
 				$img =~ s#.*/##;	# eliminate folder path
 				print "SCRAPE_US title=>$title img=>$img\n" if $verbose > 2;
 				$game{us}{title} = $title;
@@ -696,7 +698,7 @@ sub scrape_us_psn_20140607 {
 			# image or locked
 			#<img title="Rampage!" alt="Rampage!" src="resistance_2_us_files/79C5ACB1375731F2778CFBEBBFE1B5BF55D23BAA.PNG">
 			#<img src="resistance_2_us_files/locked_trophy.png">
-			if ($tok->is_start_tag('img') && $tok->get_attr('title') ne '') {
+			if ($tok->is_start_tag('img') && $tok->get_attr('title') ne '' && $tok->get_attr('title') ne 'Sony') {
 				my $img = $tok->get_attr('src');
 				$img =~ s#.*/##;	# eliminate folder path
 				print "SCRAPE_US $trophyn img=>$img\n" if $verbose > 2;
