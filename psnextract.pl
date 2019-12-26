@@ -28,6 +28,7 @@
 use strict;
 use Getopt::Long;
 use HTML::TokeParser::Simple;
+use HTML::Strip;
 use File::Copy;
 use File::Basename;
 
@@ -46,6 +47,8 @@ $script_name OPTIONS --us|--uk=/psn.html
 		path to uk_psn save-as-webpage html (files directory derived)
 	--us=/path/to/us_psn.html
 		path to us_psn save-as-webpage html (files directory derived)
+	--my=/path/to/my_psn.html
+		path to my_psn save-as-webpage html (files directory derived)
 	-v, --verbose
 		increase verbosity
 	-w, --web=/path/to/webdir
@@ -69,6 +72,7 @@ my $include;
 my $override;
 my $uk;	# path to uk html file
 my $us;	# path to us html file
+my $my;	# path to my.playstation.com html file
 my $verbose;
 my $web;
 my $getopt = GetOptions(
@@ -78,6 +82,7 @@ my $getopt = GetOptions(
 	"override=s"=>\$override,
 	"uk=s"=>\$uk,
 	"us=s"=>\$us,
+	"my=s"=>\$my,
 	"verbose+"=>\$verbose,
 	"web=s"=>\$web,
 ) or die "Invalid arguments\n";
@@ -86,8 +91,8 @@ die "Error processing arguments\n" unless $getopt;
 if ($help || !$num_args) {
 	die $usage;
 }
-if (!$us && !$uk) {
-	die "Error: Require one or both of --us or --uk else nothing to do.\n\n$usage";	
+if (!$us && !$uk && !$my) {
+	die "Error: Require one or all of --us or --uk or --my else nothing to do.\n\n$usage";
 }
 
 # global hash of trophy to mini filename
@@ -119,6 +124,7 @@ main: {
 	# build us/uk hashes from html save-as-webpage data
 	scrape_us_psn_20150813($us) if $us;
 	scrape_uk_psn_20140607($uk) if $uk;
+	scrape_my_psn_20191226($my) if $my;
 	
 	# build addendums hash from local file
 	parse_overrides($override) if ($override);
@@ -126,8 +132,9 @@ main: {
 	# continue to see the following:
 	# us: datestamps, bigger trophy graphics, often misses dlc
 	# uk: usually dlc, no datestamps
+	# my: replaces us and uk, no datestamps
 	# override: local file to add datestamps and other gamedata
-	# therefore we overlay for precedence: uk -> us -> overrides
+	# therefore we overlay for precedence: uk -> us -> my -> overrides
 	merge_gamedata();
 	merge_trophies();
 	
@@ -199,6 +206,14 @@ sub build_web {
 		$ukfiles =~ s#\.html#_files/#;		# resistance_2_uk_files, assuming firefox behavior
 		$sources{'uk'} = $ukpath.$ukfiles;
 		print "uk => $uk $ukbase $ukfiles\n" if $verbose;
+	}
+	if ($my) {
+		my ($mybase, $mypath, $mysuffix) = fileparse($my);	# /path/to/resistance_2_my.html or just resistance_2_my.html
+		#print "$my => mybase: $mybase, mypath: $mypath, mysuffix: $mysuffix\n" if $verbose;
+		my $myfiles = $mybase;
+		$myfiles =~ s#\.html#_files/#;		# resistance_2_my_files, assuming firefox behavior
+		$sources{'my'} = $mypath.$myfiles;
+		print "my => $my $mybase $myfiles\n" if $verbose;
 	}
 	
 	print "\n" if $verbose;
@@ -276,6 +291,15 @@ sub merge_gamedata {
 		}
 		print "\n" if $verbose > 1;
 	}
+	# my
+	if ($game{my}) {
+		my %game_my = %{$game{my}};
+		foreach my $a (sort(keys(%game_my))) {
+			print "MY: $a=>$game_my{$a}\n" if $verbose > 1;
+			$game{final}{$a} = $game_my{$a};
+		}
+		print "\n" if $verbose > 1;
+	}
 	# overrides
 	if ($game{override}) {
 		my %game_over = %{$game{override}};
@@ -319,6 +343,21 @@ sub merge_trophies {
 			$trophies{final}{$n} = $trophies_us{$n};
 		}
 	}
+	# my
+	if ($trophies{my}) {
+		my %trophies_my = %{$trophies{my}};
+		foreach my $n (sort {$a <=> $b} (keys(%trophies_my))) {
+			if ($verbose) {
+				#print STDERR "$_:${$trophies_my{$_}}{img}:\n";
+				my %trophy = %{$trophies_my{$n}};
+				foreach (sort(keys(%trophy))) {
+					print "MY: $n $_=>$trophy{$_}\n" if $verbose > 1;
+				}
+				print "\n" if $verbose > 1;
+			}
+			$trophies{final}{$n} = $trophies_my{$n};
+		}
+	}
 	# overrides
 	if ($trophies{override}) {
 		my %trophies_over = %{$trophies{override}};
@@ -360,6 +399,220 @@ sub parse_overrides {
 		}
 	}
 	close (FH);
+	print "\n--\n\n" if $verbose > 2;
+}
+
+# 2019-08-11 my.playstation.com
+#            <li class="game-trophies-page__tile-container">
+#              <button id="ember4194" class="trophy-tile ember-view"><div class="trophy-tile__image-container">
+#      <div class="trophy-tile__unlocked-trophy-background"></div>
+#      <img alt="Trophy Icon" src="uncharted_4_a_thiefs_end_ps4_files/E2AC09D649FE91D06F7BCD7236CFC5C1A56B3A06.PNG" class="trophy-tile__image">
+#</div>
+#
+#<div class="trophy-tile__info-container
+#  ">
+#  <div class="trophy-tile__sub-info-container">
+#      <div class="trophy-tile__tier-icon trophy-tile__tier-icon--platinum"></div>
+#    <div class="trophy-tile__name-rarity-container">
+#        <div class="trophy-tile__name">
+#          <div id="ember4195" class="ember-view">  <div class="truncate-multiline--truncation-target"><span class="truncate-multiline--last-line-wrapper"><span>One Last Time</span><button class="truncate-multiline--button-hidden" data-ember-action="" data-ember-action-7060="7060">
+#<!---->  </button></span></div>
+#  
+#</div>
+#        </div>
+#      <div class="trophy-tile__rarity">
+#        Ultra Rare <span dir="ltr">0.7%</span>
+#      </div>
+#    </div>
+#  </div>
+#      <div class="trophy-tile__detail">
+#        <div id="ember4197" class="ember-view">  <div class="truncate-multiline--truncation-target"><span class="truncate-multiline--last-line-wrapper"><span>Collect All The Trophies</span><button class="truncate-multiline--button-hidden" data-ember-action="" data-ember-action-7061="7061">
+#<!---->  </button></span></div>
+#  
+#</div>
+#      </div>
+#</div>
+#</button>
+#            </li>
+sub scrape_my_psn_20191226 {
+	my ($htmlfile) = @_;
+
+	# So much crap here we isolate to the section we care about and clean up
+	my $htmlstr;
+	my $gameon = 1;
+	open (my $fh,$htmlfile) or die "Cannot open $htmlfile: $!\n";
+	while (<$fh>) {
+		#if (m/<div class="game-trophies-page__addon-tile-divider/) { $gameon = 1; next; }
+		#if (m/<footer role="contentinfo" class="footer-container">/) { $gameon = 0; last; }
+		if ($gameon) {
+			chomp($_);
+			s/^\s+//;
+			s/\s+$//;
+			$htmlstr .= $_;
+		}
+	}
+	close ($fh);
+
+	#print $htmlstr;
+
+	# Game data and trophy row html blocks follow
+	my $p = HTML::TokeParser::Simple->new(\$htmlstr);
+	my $trophyn = 0;
+	my $tokn = 0;
+	while ( my $tok = $p->get_token ) {
+		# new trophy increment
+		#<li class="game-trophies-page__tile-container">
+		if ($tok->is_start_tag('li') && $tok->get_attr('class') eq "game-trophies-page__tile-container") {
+			$trophyn++;
+			$tokn = 0;
+			print "SCRAPE_MY $trophyn\n" if $verbose > 2;
+			$trophies{'my'}{$trophyn}{source} = 'my';
+		}
+
+		# debug
+		if ($verbose > 2) {
+			my $asis = $tok->as_is();
+			my $tag = $tok->get_tag();
+			my $hash = $tok->get_attr();
+			my $class = $tok->get_attr('class');
+			print "$trophyn $tokn $asis | tag:$tag class:$class\n";
+		}
+
+		# First batch of html before trophies contains gamedata bits such as
+		# percentage, trophy counts, etc, which we stuff into the global %game
+		# hash for use in the masthead banner row.
+		if ($trophyn == 0) {
+			# game avatar
+			#<img alt="Jeff Hardy's Avatar" src="star_trek_bridge_crew_ps4_files/A0031_m.png" id="ember1167" class="user-tile-sticky-bar__primary-image user-tile-sticky-bar__primary-image--avatar ember-view">
+			if ($tok->is_start_tag('img') and $tok->get_attr('class') eq 'user-tile-sticky-bar__primary-image user-tile-sticky-bar__primary-image--avatar ember-view') {
+				my $avatar = $tok->get_attr('src');
+				$avatar =~ s#.*/##;	# eliminate folder path
+				print "SCRAPE_MY avatar=>$avatar\n" if $verbose > 2;
+				$game{my}{avatar} = $avatar;
+			}
+
+			# game user
+			#<span dir="ltr" class="user-tile-sticky-bar__online-id online-id">fritxhardy</span>
+			if ($tok->is_start_tag('span') and $tok->get_attr('class') eq 'user-tile-sticky-bar__online-id online-id') {
+				my $user = $p->peek(1);
+				print "SCRAPE_MY user=>$user\n" if $verbose > 2;
+				$game{my}{user} = $user;
+			}
+
+			# game image
+			#<img src="uncharted_4_a_thiefs_end_ps4_files/0CAA52366C0F14C85A71FACB36BDD29122DF85D6.PNG" alt="" class="game-tile__image">
+			if ($tok->is_start_tag('img') && $tok->get_attr('class') eq 'game-tile__image') {
+				my $img = $tok->get_attr('src');
+				$img = clean_str($img);
+				$img =~ s#.*/##;	# eliminate folder path
+				print "SCRAPE_MY img=>$img\n" if $verbose > 2;
+				$game{my}{img} = $img;
+				$game{my}{source} = 'my';
+			}
+
+			# game title
+			#<h2 title="Star Trek: Bridge Crew" class="game-tile__title">
+			if ($tok->is_start_tag('h2') && $tok->get_attr('class') eq 'game-tile__title') {
+				my $title = $tok->get_attr('title');
+				$title = clean_str($title);
+				print "SCRAP_MY title=>$title\n" if $verbose > 2;
+				$game{my}{title} = $title;
+			}
+
+			# progress bar
+			#<div class="progress-bar__progress-percentage">90%</div>
+			if ($tok->is_start_tag('div') and $tok->get_attr('class') eq 'progress-bar__progress-percentage') {
+				my $progress = $p->peek(1);
+				$progress =~ s/\%//;
+				print "SCRAPE_MY progress=>$progress\n" if $verbose > 2;
+				$game{my}{progress} = $progress;
+			}
+
+			# trophy counts
+			#<div class="trophy-count__platinum-tier trophy-count__tier-count">0</div>
+			#<div class="trophy-count__gold-tier trophy-count__tier-count">3</div>
+			#<div class="trophy-count__silver-tier trophy-count__tier-count">13</div>
+			#<div class="trophy-count__bronze-tier trophy-count__tier-count">15</div>
+			if ($tok->is_start_tag('div') and $tok->get_attr('class') =~ m/trophy-count__(\S+)-tier trophy-count__tier-count/) {
+				my $metal = $1;
+				my $count = $p->peek(1);
+				print "SCRAPE_MY $metal=>$count\n" if $verbose > 2;
+				$game{my}{$metal} = $count;
+			}
+		}
+		else {
+			# unlocked true/false
+			#<div class="trophy-tile__unlocked-trophy-background"></div>
+			#<div class="trophy-tile__locked-trophy-background"></div>
+			if ($tok->is_start_tag('div') && $tok->get_attr('class') =~ m/trophy-tile__(\S+)-trophy-background/) {
+				# get trophy lock status as well
+				my $unlocked = ($1 eq 'unlocked') ? 'true' : 'false';
+				print "SCRAPE_MY $trophyn unlocked=>$unlocked\n" if $verbose > 2;
+				$trophies{'my'}{$trophyn}{unlocked} = $unlocked;
+			}
+
+			#<img alt="Trophy Icon" src="uncharted_4_a_thiefs_end_ps4_files/E2AC09D649FE91D06F7BCD7236CFC5C1A56B3A06.PNG" class="trophy-tile__image">
+			if ($tok->is_start_tag('img') && $tok->get_attr('alt') eq 'Trophy Icon') {
+				my $img = $tok->get_attr('src');
+				$img =~ s#.*/##;	# eliminate folder path
+				print "SCRAPE_MY $trophyn img=>$img\n" if $verbose > 2;
+				$trophies{'my'}{$trophyn}{img} = $img;
+			}
+
+			#<div class="trophy-tile__tier-icon trophy-tile__tier-icon--platinum"></div>
+			if ($tok->is_start_tag('div') && $tok->get_attr('class') =~ m/trophy-tile__tier-icon--(\S+)/) {
+				print "SCRAPE_MY $trophyn metal=>$1\n" if $verbose > 2;
+				$trophies{my}{$trophyn}{metal} = $1;
+			}
+
+			#<div class="trophy-tile__name">
+			#		<div id="ember4195" class="ember-view">  <div class="truncate-multiline--truncation-target"><span class="truncate-multiline--last-line-wrapper"><span>One Last Time</span><button class="truncate-multiline--button-hidden" data-ember-action="" data-ember-action-7060="7060">
+			#<!---->  </button></span></div>
+			if ($tok->is_start_tag('div') && $tok->get_attr('class') eq 'trophy-tile__name') {
+				# lots of needless spanning so peek and cut
+				my $name = $p->peek(20);
+				$name =~ s/\<button.*//;
+
+				# strip html
+				my $hs = HTML::Strip->new();
+				$name = $hs->parse( $name );
+				$hs->eof;
+
+				# strip leading and trailing space
+				$name =~ s/^\s+|\s+$//g;
+
+				# clean non-ascii
+				$name = clean_str($name);
+
+				print "SCRAPE_MY $trophyn name=>$name\n" if $verbose > 2;
+				$trophies{my}{$trophyn}{name} = $name;
+			}
+
+			#<div class="trophy-tile__detail">
+	        #		<div id="ember5090" class="ember-view">  <div class="truncate-multiline--truncation-target"><span class="truncate-multiline--last-line-wrapper"><span>Collect All The Trophies</span><button class="truncate-multiline--button-hidden" data-ember-action="" data-ember-action-5091="5091">
+			#<!---->  </button></span></div>
+			if ($tok->is_start_tag('div') && $tok->get_attr('class') eq 'trophy-tile__detail') {
+				# lots of needless spanning so peek and cut
+				my $text = $p->peek(20);
+				$text =~ s/\<button.*//;
+
+				# strip html
+				my $hs = HTML::Strip->new();
+				$text = $hs->parse( $text );
+				$hs->eof;
+
+				# strip leading and trailing space
+				$text =~ s/^\s+|\s+$//g;
+
+				# clean non-ascii
+				$text = clean_str($text);
+
+				print "SCRAPE_MY $trophyn text=>$text\n" if $verbose > 2;
+				$trophies{my}{$trophyn}{text} = $text;
+			}
+		}
+		$tokn++;
+	}
 	print "\n--\n\n" if $verbose > 2;
 }
 
