@@ -35,19 +35,16 @@ use Data::Dumper;
 
 my $script_name = $0; $script_name =~ s/.*\///;
 my $usage = sprintf <<EOT;
-$script_name OPTIONS --us|--uk=/psn.html
+$script_name OPTIONS --game us:psn.html --game uk:psn.html --game my:psn.html
 	-d, --dryrun
 		show what would be done
 	-h, --help
 		this help message
 	-i, --include=/path/to/include/graphics
 		path to provided graphics when building web
-	--uk=/path/to/uk_psn.html
-		path to uk_psn save-as-webpage html (files directory derived)
-	--us=/path/to/us_psn.html
-		path to us_psn save-as-webpage html (files directory derived)
-	--my=/path/to/my_psn.html
-		path to my_psn save-as-webpage html (files directory derived)
+	--game=src:/path/to/game_psn.html
+		path to psn save-as-webpage html (files directory derived)
+		valid src: us, uk, my
 	-v, --verbose
 		increase verbosity
 	-w, --web=/path/to/webdir
@@ -68,18 +65,14 @@ my $num_args = scalar(@ARGV);
 my $dryrun;
 my $help;
 my $include;
-my @uk;	# path to uk.playstation.com html file
-my @us;	# path to us.playstation.com html file
-my @my;	# path to my.playstation.com html file
+my @game;	# prefixed path to playstation.com html file, ex: my:input/my/resistance_2_ps3.html
 my $verbose;
 my $web;
 my $getopt = GetOptions(
 	"dryrun"=>\$dryrun,
 	"help"=>\$help,
 	"include=s"=>\$include,
-	"uk=s"=>\@uk,
-	"us=s"=>\@us,
-	"my=s"=>\@my,
+	"game=s"=>\@game,
 	"verbose+"=>\$verbose,
 	"web=s"=>\$web,
 ) or die "Invalid arguments\n";
@@ -88,8 +81,8 @@ die "Error processing arguments\n" unless $getopt;
 if ($help || !$num_args) {
 	die $usage;
 }
-if (!@us && !@uk && !@my) {
-	die "Error: Require one or all of --us or --uk or --my else nothing to do.\n\n$usage";
+if (!@game) {
+	die "Error: Require at least one --game.\n\n$usage";
 }
 
 # global hash of trophy to mini filename
@@ -130,41 +123,38 @@ my @games;
 
 main: {
 	# parse save-as-webpage data
+	# each game is prefixed by source
+	# us:/path/to/resistance_2_ps3.html
+	# uk:/path/to/resistance_2_ps3.html
+	# my:/path/to/resistance_2_ps3.html
 
-	# us.playstation.com
-	foreach my $f (@us) {
-		my $gamedata = scrape_us_psn_20150813($f);
-		my ($base, $path, $suffix) = fileparse($f);	# /path/to/resistance_2_ps3.html
-		$$gamedata{source_html} = $f;
-		$$gamedata{source_files} = $f;
+	foreach my $g (@game) {
+		my ($source,$file) = split(/\:/,$g);
+
+		# parse the source with appropriate function
+		my $gamedata;
+		if ($source eq 'us') {	# us.playstation.com
+			$gamedata = scrape_us_psn_20150813($file);
+		} elsif ($source eq 'uk') {	# uk.playstation.com
+			$gamedata = scrape_uk_psn_20140607($file);
+		} elsif ($source eq 'my') {	# my.playstation.com
+			$gamedata = scrape_my_psn_20191226($file);
+		} else {
+			die "Invalid source specification.\n";
+		}
+
+		# sprinkle in more metadata
+		my ($base, $path, $suffix) = fileparse($file);	# /path/to/resistance_2_ps3.html
+		$$gamedata{source_html} = $file;
+		$$gamedata{source_files} = $file;
 		$$gamedata{source_files} =~ s#\.html#_files/#;	# resistance_2_ps3_files
 		$$gamedata{id} = $base;
 		$$gamedata{id} =~ s#\.html##;	# resistance_2_ps3
+
+		# add parsed data to the list
 		push (@games,$gamedata);
 	}
-	# uk.playstation.com
-	foreach my $f (@uk) {
-		my $gamedata = scrape_uk_psn_20140607($f);
-		my ($base, $path, $suffix) = fileparse($f);	# /path/to/resistance_2_ps3.html
-		$$gamedata{source_html} = $f;
-		$$gamedata{source_files} = $f;
-		$$gamedata{source_files} =~ s#\.html#_files/#;	# resistance_2_ps3_files
-		$$gamedata{id} = $base;
-		$$gamedata{id} =~ s#\.html##;	# resistance_2_ps3
-		push (@games,$gamedata);
-	}
-	# my.playstation.com
-	foreach my $f (@my) {
-		my $gamedata = scrape_my_psn_20191226($f);
-		my ($base, $path, $suffix) = fileparse($f);	# /path/to/resistance_2_ps3.html
-		$$gamedata{source_html} = $f;
-		$$gamedata{source_files} = $f;
-		$$gamedata{source_files} =~ s#\.html#_files/#;	# resistance_2_ps3_files
-		$$gamedata{id} = $base;
-		$$gamedata{id} =~ s#\.html##;	# resistance_2_ps3
-		push (@games,$gamedata);
-	}
-	
+
 	# pure debugging final result
 	if ($verbose) {
 		#print Dumper(\@games);
