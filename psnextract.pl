@@ -32,6 +32,7 @@ use HTML::Strip;
 use File::Copy;
 use File::Basename;
 use Data::Dumper;
+use Tie::IxHash;
 
 my $script_name = $0; $script_name =~ s/.*\///;
 my $usage = sprintf <<EOT;
@@ -65,7 +66,7 @@ my $num_args = scalar(@ARGV);
 my $dryrun;
 my $help;
 my $include;
-my @game;	# prefixed path to playstation.com html file, ex: my:input/my/resistance_2_ps3.html
+my @game;	# prefixed path to playstation.com html file, ex: my:/path/to/resistance_2_ps3.html
 my $verbose;
 my $web;
 my $getopt = GetOptions(
@@ -119,7 +120,7 @@ my %trophy_small = (
 #  'img' => 'E2AC09D649FE91D06F7BCD7236CFC5C1A56B3A06.PNG',
 #  'source' => 'my'
 #}
-my @games;
+tie my %games => 'Tie::IxHash';
 
 main: {
 	# parse save-as-webpage data
@@ -145,21 +146,22 @@ main: {
 
 		# sprinkle in more metadata
 		my ($base, $path, $suffix) = fileparse($file);	# /path/to/resistance_2_ps3.html
+		my $id = $base;
+		$id =~ s#\.html##;	# resistance_2_ps3
 		$$gamedata{source_html} = $file;
 		$$gamedata{source_files} = $file;
 		$$gamedata{source_files} =~ s#\.html#_files/#;	# resistance_2_ps3_files
-		$$gamedata{id} = $base;
-		$$gamedata{id} =~ s#\.html##;	# resistance_2_ps3
+		$$gamedata{id} = $id;
 
 		# add parsed data to the list
-		push (@games,$gamedata);
+		$games{$id} = $gamedata;
 	}
 
 	# pure debugging final result
 	if ($verbose) {
 		#print Dumper(\@games);
-		foreach my $game (@games) {
-			my %game = %$game;
+		foreach my $game (keys(%games)) {
+			my %game = %{$games{$game}};
 			foreach my $attr (sort(keys(%game))) {
 				print "$attr: $game{$attr}\n" unless ($attr eq 'trophies');
 			}
@@ -176,19 +178,17 @@ main: {
 			}
 		}
 	}
-	
+
 	# build web directory and copy source graphics
-	build_web ($web,\@games,$include) if $web; #&& !$nocopy
+	build_web ($web,\%games,$include) if $web; #&& !$nocopy
 	
 	# write html into web directory
-	write_html ($web,\@games) if $web;
+	write_html ($web,\%games) if $web;
 }
 
 sub build_web {
 	my ($web,$games,$include) = @_;
-	
-#	my %trophies = %$trophies;
-	
+
 	if (-e $web && ! -d $web) {
 		die "ERROR: $web already exists and is not a directory, exiting\n";	
 	}
@@ -214,27 +214,25 @@ sub build_web {
 		print "$ret\n" if $verbose;
 	}
 	
-	# copy game images
-	foreach my $game (@$games) {
+	# copy game and trophy images
+	foreach my $g (keys(%$games)) {
+		my %game = %{$games{$g}};
 		foreach my $attr ('img','avatar') {
-			if ($$game{$attr}) {
+			if ($game{$attr}) {
 				# ASDF.PNG
-				my $imgpath = $$game{source_files}.$$game{$attr};
+				my $imgpath = $game{source_files}.$game{$attr};
 				print "cp -a $imgpath $web: " if $verbose;
 				my $ret = system("cp","-a",$imgpath, $web); $ret >>= 8;
 				print "$ret\n" if $verbose;
 			}
 		}
-	}
 	
-	# copy trophy images
-	foreach my $game (@$games) {
-		my %trophies = %{$$game{trophies}};
+		my %trophies = %{$game{trophies}};
 		foreach my $n (sort {$a <=> $b} (keys(%trophies))) {
 			my %trophy = %{$trophies{$n}};
 			next if !$trophy{img};
 			# ASDF.PNG
-			my $imgpath = $$game{source_files}.$trophy{img};
+			my $imgpath = $game{source_files}.$trophy{img};
 			print "cp -a $imgpath $web: " if $verbose;
 			my $ret = system("cp","-a",$imgpath,$web); $ret >>= 8;
 			print "$ret\n" if $verbose;
@@ -890,8 +888,9 @@ sub write_html {
 	my ($web,$games) = @_;
 
 	my @titles;
-	foreach my $game (@$games) {
-		push(@titles,$$game{title});
+	foreach my $g (keys %$games) {
+		my %game = %{$games{$g}};
+		push(@titles,$game{title});
 	}
 	my $title = join(',',@titles);
 
@@ -1080,9 +1079,10 @@ sub write_html {
 <div class="table">
 EOT
 
-	foreach my $game (@$games) {
-		my $ttot = $$game{platinum}+$$game{gold}+$$game{silver}+$$game{bronze};
-		my $caption = $$game{caption} ? $$game{caption} : '';
+	foreach my $g (keys %$games) {
+		my %game = %{$games{$g}};
+		my $ttot = $game{platinum}+$game{gold}+$game{silver}+$game{bronze};
+		my $caption = $game{caption} ? $game{caption} : '';
 
 		#print $out "$game{title} $game{img} $game{user} $game{avatar} bronze:$game{bronze} silver:$game{silver} gold:$game{gold} platinum:$game{platinum} progress:$game{progress}\n";
 
@@ -1094,40 +1094,40 @@ EOT
 
 		print $out "\t<div class=\"gamegraphic\">\n";
 		print $out "\t\t<div class=\"gamegraphic_img\">\n";
-		print $out "\t\t\t<img src=\"$$game{img}\" title=\"$$game{title}\" alt=\"$$game{title}\" width=\"167\" height=\"92\">\n";
+		print $out "\t\t\t<img src=\"$game{img}\" title=\"$game{title}\" alt=\"$game{title}\" width=\"167\" height=\"92\">\n";
 		print $out "\t\t</div>\n";
 		print $out "\t</div>\n";
 
 		print $out "\t<div class=\"gameinfo\">\n";
 
 		print $out "\t\t<div class=\"gameinfo_title\">\n";
-		print $out "\t\t\t$$game{title}<br>\n";
+		print $out "\t\t\t$game{title}<br>\n";
 		print $out "\t\t</div>\n";
 
 		print $out "\t\t<div class=\"gameinfo_avatar\">\n";
-		print $out "\t\t\t<img src=\"$$game{avatar}\" title=\"$$game{user}\" alt=\"$$game{user}\" width=\"25\" height=\"25\">\n";
+		print $out "\t\t\t<img src=\"$game{avatar}\" title=\"$game{user}\" alt=\"$game{user}\" width=\"25\" height=\"25\">\n";
 		print $out "\t\t</div>\n";
 
 		print $out "\t\t<div class=\"gameinfo_user\">\n";
-		print $out "\t\t$$game{user}\n";
+		print $out "\t\t$game{user}\n";
 		print $out "\t\t</div>\n";
 
 		print $out "\t\t<div class=\"gameinfo_progressbar\">\n";
-		print $out "\t\t\t<div class=\"gameinfo_progressslider\" style=\"width: $$game{progress}%\"></div>\n";
+		print $out "\t\t\t<div class=\"gameinfo_progressslider\" style=\"width: $game{progress}%\"></div>\n";
 		print $out "\t\t</div>\n";
-		print $out "\t\t<div class=\"gameinfo_progresstext\">$$game{progress}%</div>\n";
+		print $out "\t\t<div class=\"gameinfo_progresstext\">$game{progress}%</div>\n";
 
 		print $out "\t</div>\n";
 
 		print $out "\t<div class=\"gametrophygraph\">\n";
 		print $out "\t\t<div class=\"gametrophygraph_mini\" style=\"right:41px;bottom:66px;\"><img src=\"trophy_mini_platinum.png\"></div>\n";
-		print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:61px;bottom:52px;\">$$game{platinum} Platinum</div>\n";
+		print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:61px;bottom:52px;\">$game{platinum} Platinum</div>\n";
 		print $out "\t\t<div class=\"gametrophygraph_mini\" style=\"right:77px;bottom:50px;\"><img src=\"trophy_mini_gold.png\"></div>\n";
-		print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:97px;bottom:36px;\">$$game{gold} Gold</div>\n";
+		print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:97px;bottom:36px;\">$game{gold} Gold</div>\n";
 		print $out "\t\t<div class=\"gametrophygraph_mini\" style=\"right:113px;bottom:34px;\"><img src=\"trophy_mini_silver.png\"></div>\n";
-		print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:133px;bottom:20px;\">$$game{silver} Silver</div>\n";
+		print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:133px;bottom:20px;\">$game{silver} Silver</div>\n";
 		print $out "\t\t<div class=\"gametrophygraph_mini\" style=\"right:149px;bottom:18px;\"><img src=\"trophy_mini_bronze.png\"></div>\n";
-		print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:169px;bottom:4px;\">$$game{bronze} Bronze</div>\n";
+		print $out "\t\t<div class=\"gametrophygraph_bar\" style=\"width:169px;bottom:4px;\">$game{bronze} Bronze</div>\n";
 		print $out "\t\t<div class=\"gametrophygraph_total\">$ttot</div>\n";
 		print $out "\t</div>\n";
 
@@ -1139,7 +1139,7 @@ EOT
 </div>
 EOT
 
-		my %trophies = %{$$game{trophies}};
+		my %trophies = %{$game{trophies}};
 		foreach (sort {$a <=> $b} (keys(%trophies))) {
 			my %trophy = %{$trophies{$_}};
 
