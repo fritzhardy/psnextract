@@ -154,7 +154,7 @@ main: {
 		$$gamedata{id} = $id;
 
 		# add parsed data to the list
-		$games{$id} = $gamedata;
+		merge_gamedata($id,\%games,$gamedata);
 	}
 
 	# pure debugging final result
@@ -259,6 +259,40 @@ sub clean_str {
 		$last_ord = $ord;
 	}
 	return $clean_str;
+}
+
+sub merge_gamedata {
+	my ($id,$games,$gamedata) = @_;
+
+	if (!(exists($$games{$id}))) {	# first hit just gets inserted
+		$$games{$id} = $gamedata;
+		print "\tNEW GAMEDATA\n" if $verbose > 2;
+	} else {						# otherwise attribute by attribute check
+		foreach my $attr (sort(keys(%$gamedata))) {
+			next if ($attr eq 'trophies');
+			print "$attr: gameshash=$$games{$id}{$attr} gamedata=$$gamedata{$attr}\n" if $verbose > 2;
+			if (!exists($$games{$id}{$attr})) {
+				print "\tINSERT $attr\n" if $verbose > 2;
+				$$games{$id}{$attr} = $$gamedata{$attr};
+			}
+		}
+		foreach my $t (sort {$a <=> $b} (keys(%{$$gamedata{trophies}}))) {
+			print "$t:\n" if $verbose > 2;
+			if (!(exists($$games{$id}{trophies}{$t}))) {	# if trophy does not exist insert it
+				$$games{$id}{trophies}{$t} = ${$$gamedata{trophies}}{$t};
+				print "\tNEW TROPHYDATA\n" if $verbose > 2;
+			} else {										# otherwise trophy attribute by attribute check
+				my $trophies = ${$$gamedata{trophies}}{$t};
+				foreach my $tattr (sort(keys(%$trophies))) {	# TODO: img paths will be a problem
+					print "\t$tattr: gameshash=$$games{$id}{trophies}{$t}{$tattr} gamedata=$$trophies{$tattr}\n" if $verbose > 2;
+					if (!exists($$games{$id}{trophies}{$t}{$tattr})) {
+						print "\tINSERT $tattr\n" if $verbose > 2;
+						$$games{$id}{trophies}{$t}{$tattr} = $$trophies{$tattr};
+					}
+				}
+			}
+		}
+	}
 }
 
 # 2019-08-11 my.playstation.com
